@@ -1,13 +1,20 @@
+// home_screen.dart
+
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'gameplay_screen.dart';  // Ini adalah LoadingScreen kamu
-import 'game_screen.dart';     // Ini adalah SnakesLaddersQuiz & GamePage
+import 'gameplay_screen.dart';
+import 'game_screen.dart';
 import 'profile_screen.dart';
 import 'materi_detail_screen.dart';
+
+// Tambahkan konstanta warna utama
+const Color _primaryColor = Color(0xFF6B73FF);
+const Color _textColorSecondary = Color(0xFF718096);
+const Color _lockedColor = Color(0xFFCBD5E0); // Warna untuk item yang terkunci
 
 class HomeScreen extends StatefulWidget {
   final String userName;
@@ -27,97 +34,124 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   int _selectedIndex = 1;
-  late Future<List<dynamic>> _futureMateri;
+  Future<List<dynamic>>? _futureMateri;
   String? _token;
 
-  late AnimationController _fadeController;
-  late AnimationController _slideController;
-  late AnimationController _cardController;
-  late AnimationController _headerController;
+  Set<int> _completedMateriIds = {};
 
-  late Animation<double> _fadeAnimation;
-  late Animation<Offset> _slideAnimation;
-  late Animation<double> _cardAnimation;
+  late AnimationController _pageLoadController;
   late Animation<double> _headerAnimation;
+  late Animation<Offset> _slideAnimation;
+  late Animation<double> _statsCardsAnimation;
+  late Animation<double> _materiListAnimation;
 
   @override
   void initState() {
     super.initState();
     _initializeAnimations();
-    _loadTokenAndFetchMateri();
+    _loadInitialData();
+  }
+
+  Future<void> _loadInitialData() async {
+    await _loadToken();
+    await _loadMateriProgress(); // Muat progress sebelum fetch materi
+    if (mounted) {
+      setState(() {
+        _futureMateri = fetchMateri();
+      });
+    }
+  }
+
+  // --- FUNGSI UNTUK MEMUAT PROGRESS MATERI DARI SHAIZREDPREFERENCES ---
+  Future<void> _loadMateriProgress() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    // MODIFIKASI: Buat kunci yang unik untuk setiap siswa menggunakan NISN
+    final progressKey = 'completedMateriIds_${widget.nisn}';
+
+    // Baca daftar ID yang sudah selesai menggunakan kunci unik tersebut
+    final completedIdsStr = prefs.getStringList(progressKey) ?? [];
+
+    final completedIds = completedIdsStr.map((id) => int.parse(id)).toSet();
+    if (mounted) {
+      setState(() {
+        _completedMateriIds = completedIds;
+      });
+    }
+  }
+
+  // --- FUNGSI UNTUK MENANDAI MATERI SEBAGAI SELESAI ---
+  Future<void> _markMateriAsCompleted(int materiId) async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _completedMateriIds.add(materiId);
+    });
+
+    // MODIFIKASI: Buat kunci yang unik untuk setiap siswa menggunakan NISN
+    final progressKey = 'completedMateriIds_${widget.nisn}';
+
+    final completedIdsStr =
+        _completedMateriIds.map((id) => id.toString()).toList();
+
+    // Simpan kembali ke SharedPreferences menggunakan kunci unik tersebut
+    await prefs.setStringList(progressKey, completedIdsStr);
   }
 
   void _initializeAnimations() {
-    _fadeController = AnimationController(vsync: this, duration: Duration(milliseconds: 800));
-    _slideController = AnimationController(vsync: this, duration: Duration(milliseconds: 600));
-    _cardController = AnimationController(vsync: this, duration: Duration(milliseconds: 1200));
-    _headerController = AnimationController(vsync: this, duration: Duration(milliseconds: 800));
+    _pageLoadController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    );
 
-    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(parent: _fadeController, curve: Curves.easeOutCubic));
-    _slideAnimation = Tween<Offset>(begin: Offset(0, 0.3), end: Offset.zero).animate(CurvedAnimation(parent: _slideController, curve: Curves.elasticOut));
-    _cardAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(parent: _cardController, curve: Curves.elasticOut));
-    _headerAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(parent: _headerController, curve: Curves.easeOutBack));
-
-    // Start animations with delays
-    _headerController.forward();
-    Future.delayed(Duration(milliseconds: 200), () {
-      _fadeController.forward();
-    });
-    Future.delayed(Duration(milliseconds: 400), () {
-      _slideController.forward();
-    });
-    Future.delayed(Duration(milliseconds: 600), () {
-      _cardController.forward();
-    });
+    _headerAnimation = CurvedAnimation(
+      parent: _pageLoadController,
+      curve: const Interval(0.0, 0.6, curve: Curves.easeOut),
+    );
+    _slideAnimation = Tween<Offset>(
+      begin: const Offset(0, 0.5),
+      end: Offset.zero,
+    ).animate(
+      CurvedAnimation(
+        parent: _pageLoadController,
+        curve: const Interval(0.2, 0.8, curve: Curves.easeOut),
+      ),
+    );
+    _statsCardsAnimation = CurvedAnimation(
+      parent: _pageLoadController,
+      curve: const Interval(0.4, 1.0, curve: Curves.elasticOut),
+    );
+    _materiListAnimation = CurvedAnimation(
+      parent: _pageLoadController,
+      curve: const Interval(0.5, 1.0, curve: Curves.easeOut),
+    );
+    _pageLoadController.forward();
   }
 
   @override
   void dispose() {
-    _fadeController.dispose();
-    _slideController.dispose();
-    _cardController.dispose();
-    _headerController.dispose();
+    _pageLoadController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadTokenAndFetchMateri() async {
+  Future<void> _loadToken() async {
     final prefs = await SharedPreferences.getInstance();
     _token = widget.token ?? prefs.getString('token');
-
-    if (_token == null) {
-      setState(() {
-        _futureMateri = Future.value([]);
-      });
-      return;
-    }
-
-    setState(() {
-      _futureMateri = fetchMateri();
-    });
   }
 
   Future<List<dynamic>> fetchMateri() async {
-    // Ganti 'http://127.0.0.1:8000' dengan IP address atau domain server kamu
-    final url = Uri.parse('http://127.0.0.1:8000/api/materi');
+    if (_token == null) {
+      throw Exception('Token tidak ditemukan. Silakan login kembali.');
+    }
 
+    final url = Uri.parse('http://114.125.252.103:8000/api/materi');
     final response = await http.get(
       url,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $_token',
-      },
+      headers: {'Authorization': 'Bearer $_token'},
     );
 
     if (response.statusCode == 200) {
       final decoded = json.decode(response.body);
-
-      if (decoded is List) {
-        return decoded;
-      } else if (decoded is Map && decoded.containsKey('data')) {
-        return decoded['data'] as List<dynamic>;
-      } else {
-        throw Exception('Format response tidak dikenali: ${response.body}');
-      }
+      return decoded as List<dynamic>;
     } else {
       throw Exception('Gagal memuat materi (status ${response.statusCode})');
     }
@@ -125,93 +159,61 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   void _onItemTapped(int index) {
     HapticFeedback.lightImpact();
+    if (index == _selectedIndex) return;
     setState(() => _selectedIndex = index);
 
     if (index == 0) {
-      // Navigasi ke LoadingScreen
-      Navigator.push(
-        context,
-        PageRouteBuilder(
-          pageBuilder: (context, animation, secondaryAnimation) => LoadingScreen(),
-          transitionsBuilder: (context, animation, secondaryAnimation, child) {
-            return FadeTransition(
-              opacity: animation,
-              child: child,
-            );
-          },
-          transitionDuration: Duration(milliseconds: 500),
-        ),
-      );
-
-      // Setelah loading, navigasi ke SnakesLaddersQuiz dengan meneruskan userName dan nisn
-      Future.delayed(Duration(seconds: 2), () {
-        Navigator.pushReplacement(
-          context,
-          PageRouteBuilder(
-            pageBuilder: (context, animation, secondaryAnimation) => SnakesLaddersQuiz(
-              userName: widget.userName, // <--- Meneruskan userName
-              nisn: widget.nisn,         // <--- Meneruskan nisn
+      Navigator.push(context, _createRoute(LoadingScreen()));
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) {
+          Navigator.pushReplacement(
+            context,
+            _createRoute(
+              SnakesLaddersQuiz(userName: widget.userName, nisn: widget.nisn),
             ),
-            transitionsBuilder: (context, animation, secondaryAnimation, child) {
-              return SlideTransition(
-                position: Tween<Offset>(
-                  begin: Offset(1.0, 0.0),
-                  end: Offset.zero,
-                ).animate(CurvedAnimation(
-                  parent: animation,
-                  curve: Curves.easeInOutCubic,
-                )),
-                child: child,
-              );
-            },
-            transitionDuration: Duration(milliseconds: 500),
-          ),
-        );
+          );
+        }
       });
     } else if (index == 2) {
-      // Navigasi ke ProfileScreen
-      Navigator.push(
-        context,
-        PageRouteBuilder(
-          pageBuilder: (context, animation, secondaryAnimation) => ProfileScreen(nisn: widget.nisn),
-          transitionsBuilder: (context, animation, secondaryAnimation, child) {
-            return SlideTransition(
-              position: Tween<Offset>(
-                begin: Offset(1.0, 0.0),
-                end: Offset.zero,
-              ).animate(CurvedAnimation(
-                parent: animation,
-                curve: Curves.easeInOutCubic,
-              )),
-              child: child,
-            );
-          },
-          transitionDuration: Duration(milliseconds: 300),
-        ),
-      );
+      Navigator.push(context, _createRoute(ProfileScreen(nisn: widget.nisn)));
     }
+  }
+
+  PageRouteBuilder _createRoute(Widget page) {
+    return PageRouteBuilder(
+      pageBuilder: (context, animation, secondaryAnimation) => page,
+      transitionsBuilder: (context, animation, secondaryAnimation, child) {
+        return FadeTransition(opacity: animation, child: child);
+      },
+      transitionDuration: const Duration(milliseconds: 400),
+    );
   }
 
   String _getGreeting() {
     final hour = DateTime.now().hour;
-    if (hour < 12) {
-      return 'Selamat Pagi';
-    } else if (hour < 17) {
-      return 'Selamat Siang';
-    } else {
-      return 'Selamat Malam';
-    }
+    if (hour < 10) return 'Selamat Pagi! 🌅';
+    if (hour < 15) return 'Selamat Siang! ☀️';
+    if (hour < 18) return 'Selamat Sore! 🌇';
+    return 'Selamat Malam! 🌙';
+  }
+
+  String _getMotivationalText() {
+    final messages = [
+      'Ayo semangat belajar hari ini! 💪',
+      'Kamu pasti bisa! Terus berusaha! 🌟',
+      'Belajar itu seru, lho! 📚✨',
+      'Setiap langkah kecil adalah kemajuan! 🚀',
+    ];
+    return messages[DateTime.now().day % messages.length];
   }
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
-
     return Scaffold(
       body: Container(
-        decoration: BoxDecoration(
+        decoration: const BoxDecoration(
           gradient: LinearGradient(
-            colors: [Color(0xFF667eea), Color(0xFF764ba2)],
+            colors: [Color(0xFF6B73FF), Color(0xFF9D50BB), Color(0xFFFF6B9D)],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
@@ -219,411 +221,146 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         child: SafeArea(
           child: Column(
             children: [
-              // Header Section
-              AnimatedBuilder(
-                animation: _headerAnimation,
-                builder: (context, child) {
-                  return Transform.scale(
-                    scale: _headerAnimation.value,
-                    child: Container(
-                      padding: EdgeInsets.all(24),
-                      child: Column(
-                        children: [
-                          // Top Header
-                          Row(
-                            children: [
-                              Container(
-                                padding: EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(0.2),
-                                  borderRadius: BorderRadius.circular(16),
-                                  border: Border.all(
-                                    color: Colors.white.withOpacity(0.3),
-                                  ),
-                                ),
-                                child: Icon(
-                                  Icons.menu_book_rounded,
-                                  color: Colors.white,
-                                  size: 28,
-                                ),
-                              ),
-                              SizedBox(width: 16),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      _getGreeting(),
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 14,
-                                        color: Colors.white.withOpacity(0.8),
-                                        fontWeight: FontWeight.w400,
-                                      ),
-                                    ),
-                                    Text(
-                                      widget.userName, // Menggunakan userName dari widget
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 20,
-                                        fontWeight: FontWeight.w700,
-                                        color: Colors.white,
-                                      ),
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              GestureDetector(
-                                onTap: () => _onItemTapped(2),
-                                child: Container(
-                                  padding: EdgeInsets.all(2),
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    gradient: LinearGradient(
-                                      colors: [
-                                        Colors.white.withOpacity(0.3),
-                                        Colors.white.withOpacity(0.1),
-                                      ],
-                                    ),
-                                  ),
-                                  child: CircleAvatar(
-                                    radius: 24,
-                                    backgroundColor: Colors.white,
-                                    child: Icon(
-                                      Icons.person_rounded,
-                                      color: Color(0xFF667eea),
-                                      size: 28,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          SizedBox(height: 24),
-                          // Stats Cards
-                          Row(
-                            children: [
-                              Expanded(
-                                child: _buildStatCard(
-                                  'Materi',
-                                  '12', // Ini mungkin perlu diganti dengan jumlah materi dinamis
-                                  Icons.library_books_rounded,
-                                  Colors.orange,
-                                ),
-                              ),
-                              SizedBox(width: 16),
-                              Expanded(
-                                child: _buildStatCard(
-                                  'Progress',
-                                  '75%', // Ini juga mungkin perlu diganti dengan progress dinamis
-                                  Icons.trending_up_rounded,
-                                  Colors.green,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
-              ),
-              // Content Section
+              FadeTransition(opacity: _headerAnimation, child: _buildHeader()),
               Expanded(
                 child: Container(
-                  decoration: BoxDecoration(
-                    color: Colors.grey[50],
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFF8F9FF),
                     borderRadius: BorderRadius.only(
-                      topLeft: Radius.circular(32),
-                      topRight: Radius.circular(32),
+                      topLeft: Radius.circular(30),
+                      topRight: Radius.circular(30),
                     ),
                   ),
-                  child: Column(
-                    children: [
-                      // Section Title
-                      Container(
-                        padding: EdgeInsets.all(24),
-                        child: Row(
-                          children: [
-                            Text(
-                              'Materi Pembelajaran',
-                              style: GoogleFonts.poppins(
-                                fontSize: 20,
-                                fontWeight: FontWeight.w700,
-                                color: Color(0xFF2D3748),
-                              ),
-                            ),
-                            Spacer(),
-                            Container(
-                              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                              decoration: BoxDecoration(
-                                gradient: LinearGradient(
-                                  colors: [
-                                    Color(0xFF667eea).withOpacity(0.1),
-                                    Color(0xFF764ba2).withOpacity(0.1),
-                                  ],
-                                ),
-                                borderRadius: BorderRadius.circular(20),
-                                border: Border.all(
-                                  color: Color(0xFF667eea).withOpacity(0.2),
-                                ),
-                              ),
-                              child: Text(
-                                'Semua Materi',
-                                style: GoogleFonts.poppins(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: Color(0xFF667eea),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      // Content List
-                      Expanded(
-                        child: FadeTransition(
-                          opacity: _fadeAnimation,
-                          child: SlideTransition(
-                            position: _slideAnimation,
-                            child: FutureBuilder<List<dynamic>>(
-                              future: _futureMateri,
-                              builder: (context, snapshot) {
-                                if (snapshot.connectionState == ConnectionState.waiting) {
-                                  return Center(
-                                    child: Column(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: [
-                                        Container(
-                                          padding: EdgeInsets.all(20),
-                                          decoration: BoxDecoration(
-                                            color: Colors.white,
-                                            shape: BoxShape.circle,
-                                            boxShadow: [
-                                              BoxShadow(
-                                                color: Color(0xFF667eea).withOpacity(0.2),
-                                                blurRadius: 20,
-                                                offset: Offset(0, 10),
-                                              ),
-                                            ],
-                                          ),
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 3,
-                                            valueColor: AlwaysStoppedAnimation<Color>(
-                                              Color(0xFF667eea),
-                                            ),
-                                          ),
-                                        ),
-                                        SizedBox(height: 16),
-                                        Text(
-                                          'Memuat materi...',
-                                          style: GoogleFonts.poppins(
-                                            fontSize: 16,
-                                            color: Color(0xFF718096),
-                                            fontWeight: FontWeight.w500,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                }
-
-                                if (snapshot.hasError) {
-                                  return Center(
-                                    child: Container(
-                                      padding: EdgeInsets.all(24),
-                                      margin: EdgeInsets.symmetric(horizontal: 24),
-                                      decoration: BoxDecoration(
-                                        color: Colors.red[50],
-                                        borderRadius: BorderRadius.circular(16),
-                                        border: Border.all(color: Colors.red[200]!),
-                                      ),
-                                      child: Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(
-                                            Icons.error_outline_rounded,
-                                            color: Colors.red[400],
-                                            size: 48,
-                                          ),
-                                          SizedBox(height: 16),
-                                          Text(
-                                            'Oops! Terjadi Kesalahan',
-                                            style: GoogleFonts.poppins(
-                                              fontSize: 18,
-                                              fontWeight: FontWeight.w600,
-                                              color: Colors.red[700],
-                                            ),
-                                          ),
-                                          SizedBox(height: 8),
-                                          Text(
-                                            'Tidak dapat memuat materi.\nPeriksa koneksi internet Anda.',
-                                            textAlign: TextAlign.center,
-                                            style: GoogleFonts.poppins(
-                                              fontSize: 14,
-                                              color: Colors.red[600],
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  );
-                                }
-
-                                if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                                  return Center(
-                                    child: Container(
-                                      padding: EdgeInsets.all(24),
-                                      margin: EdgeInsets.symmetric(horizontal: 24),
-                                      decoration: BoxDecoration(
-                                        color: Colors.white,
-                                        borderRadius: BorderRadius.circular(16),
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: Colors.grey.withOpacity(0.1),
-                                            blurRadius: 10,
-                                            offset: Offset(0, 4),
-                                          ),
-                                        ],
-                                      ),
-                                      child: Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(
-                                            Icons.book_outlined,
-                                            color: Color(0xFF718096),
-                                            size: 48,
-                                          ),
-                                          SizedBox(height: 16),
-                                          Text(
-                                            'Belum Ada Materi',
-                                            style: GoogleFonts.poppins(
-                                              fontSize: 18,
-                                              fontWeight: FontWeight.w600,
-                                              color: Color(0xFF2D3748),
-                                            ),
-                                          ),
-                                          SizedBox(height: 8),
-                                          Text(
-                                            'Materi pembelajaran akan segera\ntersedia untuk Anda.',
-                                            textAlign: TextAlign.center,
-                                            style: GoogleFonts.poppins(
-                                              fontSize: 14,
-                                              color: Color(0xFF718096),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  );
-                                }
-
-                                final materiList = snapshot.data!;
-                                return AnimatedBuilder(
-                                  animation: _cardAnimation,
-                                  builder: (context, child) {
-                                    return ListView.separated(
-                                      physics: BouncingScrollPhysics(),
-                                      padding: EdgeInsets.fromLTRB(24, 0, 24, 100),
-                                      itemCount: materiList.length,
-                                      separatorBuilder: (_, __) => SizedBox(height: 16),
-                                      itemBuilder: (context, index) {
-                                        final delay = index * 0.1;
-                                        final animationValue = Curves.elasticOut.transform(
-                                          (_cardAnimation.value - delay).clamp(0.0, 1.0),
-                                        );
-                                        return Transform.scale(
-                                          scale: animationValue,
-                                          child: _buildMateriCard(materiList[index], index),
-                                        );
-                                      },
-                                    );
-                                  },
-                                );
-                              },
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                  child: _buildMateriList(),
                 ),
               ),
             ],
           ),
         ),
       ),
-
-      // Bottom Navigation
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.only(
-            topLeft: Radius.circular(24),
-            topRight: Radius.circular(24),
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.1),
-              blurRadius: 20,
-              offset: Offset(0, -5),
-            ),
-          ],
-        ),
-        child: SafeArea(
-          child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: [
-                _buildNavItem(Icons.sports_esports_rounded, 0),
-                _buildNavItem(Icons.home_rounded, 1),
-                _buildNavItem(Icons.person_rounded, 2),
-              ],
-            ),
-          ),
-        ),
-      ),
+      bottomNavigationBar: _buildBottomNavBar(),
     );
   }
 
-  Widget _buildStatCard(String title, String value, IconData icon, Color color) {
+  Widget _buildHeader() {
     return Container(
-      padding: EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.2),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: Colors.white.withOpacity(0.3),
-        ),
-      ),
-      child: Row(
+      padding: const EdgeInsets.all(20),
+      child: Column(
         children: [
-          Container(
-            padding: EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.2),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(icon, color: color, size: 20),
-          ),
-          SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  value,
-                  style: GoogleFonts.poppins(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white,
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.1),
+                      blurRadius: 10,
+                    ),
+                  ],
+                ),
+                child: const Text('📚', style: TextStyle(fontSize: 24)),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _getGreeting(),
+                      style: GoogleFonts.nunito(
+                        fontSize: 16,
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    Text(
+                      widget.userName,
+                      style: GoogleFonts.nunito(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              GestureDetector(
+                onTap: () => _onItemTapped(2),
+                child: Hero(
+                  tag: 'profile_avatar',
+                  child: CircleAvatar(
+                    radius: 24,
+                    backgroundColor: Colors.white,
+                    child: Text(
+                      widget.userName.isNotEmpty
+                          ? widget.userName[0].toUpperCase()
+                          : '?',
+                      style: GoogleFonts.nunito(
+                        color: _primaryColor,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 18,
+                      ),
+                    ),
                   ),
                 ),
-                Text(
-                  title,
-                  style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    color: Colors.white.withOpacity(0.8),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          SlideTransition(
+            position: _slideAnimation,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.white.withOpacity(0.3)),
+              ),
+              child: Text(
+                _getMotivationalText(),
+                textAlign: TextAlign.center,
+                style: GoogleFonts.nunito(
+                  fontSize: 14,
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          ScaleTransition(
+            scale: _statsCardsAnimation,
+            child: Row(
+              children: [
+                Expanded(
+                  child: _buildStatCard(
+                    'Materi',
+                    '12',
+                    Icons.book_rounded,
+                    const Color(0xFFFFB74D),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _buildStatCard(
+                    'Progress',
+                    '75%',
+                    Icons.trending_up_rounded,
+                    const Color(0xFF66BB6A),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _buildStatCard(
+                    'Streak',
+                    '5 hari',
+                    Icons.local_fire_department_rounded,
+                    const Color(0xFFEF5350),
                   ),
                 ),
               ],
@@ -634,154 +371,316 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildNavItem(IconData icon, int index) {
-    final isSelected = _selectedIndex == index;
+  Widget _buildStatCard(
+    String title,
+    String value,
+    IconData icon,
+    Color color,
+  ) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: color.withOpacity(0.3),
+            blurRadius: 10,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Icon(icon, color: Colors.white, size: 24),
+          const SizedBox(height: 8),
+          Text(
+            value,
+            style: GoogleFonts.nunito(
+              fontSize: 14,
+              fontWeight: FontWeight.w800,
+              color: Colors.white,
+            ),
+          ),
+          Text(
+            title,
+            style: GoogleFonts.nunito(
+              fontSize: 10,
+              color: Colors.white.withOpacity(0.9),
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
-    return GestureDetector(
-      onTap: () => _onItemTapped(index),
-      child: AnimatedContainer(
-        duration: Duration(milliseconds: 200),
-        padding: EdgeInsets.symmetric(
-          horizontal: isSelected ? 16 : 12,
-          vertical: 12,
+  Widget _buildMateriList() {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
+          child: Row(
+            children: [
+              Text(
+                '📚 Materi Belajar',
+                style: GoogleFonts.nunito(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                  color: const Color(0xFF2D3748),
+                ),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: _primaryColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  'Semua',
+                  style: GoogleFonts.nunito(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: _primaryColor,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
-        decoration: BoxDecoration(
-          gradient: isSelected
-              ? LinearGradient(
-                  colors: [Color(0xFF667eea), Color(0xFF764ba2)],
-                )
-              : null,
-          borderRadius: BorderRadius.circular(16),
+        Expanded(
+          child: FutureBuilder<List<dynamic>>(
+            future: _futureMateri,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(
+                  child: CircularProgressIndicator(color: _primaryColor),
+                );
+              }
+              if (snapshot.hasError) {
+                return Center(
+                  child: Text(
+                    'Gagal memuat: ${snapshot.error}',
+                    style: GoogleFonts.nunito(color: _textColorSecondary),
+                  ),
+                );
+              }
+              if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                return Center(
+                  child: Text(
+                    'Belum ada materi tersedia.',
+                    style: GoogleFonts.nunito(color: _textColorSecondary),
+                  ),
+                );
+              }
+
+              final materiList = snapshot.data!;
+              return FadeTransition(
+                opacity: _materiListAnimation,
+                child: ListView.builder(
+                  physics: const BouncingScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(20, 10, 20, 100),
+                  itemCount: materiList.length,
+                  itemBuilder: (context, index) {
+                    final materi = materiList[index];
+
+                    final bool isLocked =
+                        index > 0 &&
+                        !_completedMateriIds.contains(
+                          materiList[index - 1]['id'],
+                        );
+
+                    return SlideTransition(
+                      position: Tween<Offset>(
+                        begin: const Offset(0, 0.5),
+                        end: Offset.zero,
+                      ).animate(
+                        CurvedAnimation(
+                          parent: _pageLoadController,
+                          curve: Interval(
+                            0.6 + (index * 0.05).clamp(0.0, 0.4),
+                            1.0,
+                            curve: Curves.easeOut,
+                          ),
+                        ),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.only(bottom: 16.0),
+                        child: _buildMateriCard(materi, index, isLocked),
+                      ),
+                    );
+                  },
+                ),
+              );
+            },
+          ),
         ),
-        child: Icon(
-          icon,
-          color: isSelected ? Colors.white : Color(0xFF718096),
-          size: 24,
+      ],
+    );
+  }
+
+  Widget _buildMateriCard(
+    Map<String, dynamic> materi,
+    int index,
+    bool isLocked,
+  ) {
+    final colors = [
+      const Color(0xFF6A5AE0),
+      const Color(0xFF48BB78),
+      const Color(0xFFF59E0B),
+      const Color(0xFFE53935),
+    ];
+    final accentColor = colors[index % colors.length];
+
+    return Opacity(
+      opacity: isLocked ? 0.5 : 1.0,
+      child: InkWell(
+        onTap:
+            isLocked
+                ? null
+                : () {
+                  HapticFeedback.lightImpact();
+                  Navigator.push(
+                    context,
+                    _createRoute(
+                      MateriDetailScreen(
+                        title: materi['judul'] ?? 'Materi',
+                        materiId: materi['id'] ?? 0,
+                        onMateriCompleted: (id) => _markMateriAsCompleted(id),
+                      ),
+                    ),
+                  );
+                },
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: isLocked ? Colors.grey.shade200 : Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Colors.grey.shade200),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(
+                  color: isLocked ? _lockedColor : accentColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Icon(
+                  isLocked ? Icons.lock_rounded : Icons.menu_book_rounded,
+                  color: isLocked ? Colors.grey.shade700 : accentColor,
+                  size: 28,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      materi['judul'] ?? 'Judul Kosong',
+                      style: GoogleFonts.poppins(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color:
+                            isLocked
+                                ? Colors.grey.shade700
+                                : const Color(0xFF2D3748),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      isLocked
+                          ? 'Selesaikan materi sebelumnya'
+                          : 'Tap untuk mulai belajar',
+                      style: GoogleFonts.nunito(
+                        fontSize: 13,
+                        color:
+                            isLocked
+                                ? Colors.grey.shade600
+                                : const Color(0xFF718096),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (!isLocked)
+                Icon(
+                  Icons.arrow_forward_ios_rounded,
+                  color: Colors.grey.shade400,
+                  size: 18,
+                ),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildMateriCard(Map<String, dynamic> materi, int index) {
-    final colors = [
-      [Color(0xFF667eea), Color(0xFF764ba2)],
-      [Color(0xFFf093fb), Color(0xFFf5576c)],
-      [Color(0xFF4facfe), Color(0xFF00f2fe)],
-      [Color(0xFF43e97b), Color(0xFF38f9d7)],
-      [Color(0xFFffecd2), Color(0xFFfcb69f)],
-    ];
-
-    final colorPair = colors[index % colors.length];
-
-    return GestureDetector(
-      onTap: () {
-        HapticFeedback.lightImpact();
-        Navigator.push(
-          context,
-          PageRouteBuilder(
-            pageBuilder: (context, animation, secondaryAnimation) => MateriDetailScreen(
-              title: materi['judul'] ?? 'Judul kosong',
-              materiId: materi['id'] ?? 0,
-            ),
-            transitionsBuilder: (context, animation, secondaryAnimation, child) {
-              return SlideTransition(
-                position: Tween<Offset>(
-                  begin: Offset(1.0, 0.0),
-                  end: Offset.zero,
-                ).animate(CurvedAnimation(
-                  parent: animation,
-                  curve: Curves.easeInOutCubic,
-                )),
-                child: child,
-              );
-            },
-            transitionDuration: Duration(milliseconds: 300),
+  Widget _buildBottomNavBar() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Color(0x1A5B6B8B),
+            blurRadius: 20,
+            offset: Offset(0, -5),
           ),
-        );
-      },
-      child: Container(
-        padding: EdgeInsets.all(20),
+        ],
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: [
+          _buildNavItem(Icons.sports_esports_rounded, 0, 'Game'),
+          _buildNavItem(Icons.home_filled, 1, 'Home'),
+          _buildNavItem(Icons.person_rounded, 2, 'Profil'),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNavItem(IconData icon, int index, String label) {
+    final isSelected = _selectedIndex == index;
+    return InkWell(
+      onTap: () => _onItemTapped(index),
+      borderRadius: BorderRadius.circular(50),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOutCubic,
+        padding: EdgeInsets.symmetric(
+          horizontal: isSelected ? 20 : 12,
+          vertical: 10,
+        ),
         decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [
-              colorPair[0].withOpacity(0.1),
-              colorPair[1].withOpacity(0.05),
-            ],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: colorPair[0].withOpacity(0.2),
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: colorPair[0].withOpacity(0.1),
-              blurRadius: 20,
-              offset: Offset(0, 8),
-            ),
-          ],
+          color:
+              isSelected ? _primaryColor.withOpacity(0.1) : Colors.transparent,
+          borderRadius: BorderRadius.circular(50),
         ),
         child: Row(
           children: [
-            Container(
-              padding: EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(colors: colorPair),
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: colorPair[0].withOpacity(0.3),
-                    blurRadius: 10,
-                    offset: Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Icon(
-                Icons.library_books_rounded,
-                color: Colors.white,
-                size: 28,
-              ),
+            Icon(
+              icon,
+              color: isSelected ? _primaryColor : _textColorSecondary,
+              size: 26,
             ),
-
-            SizedBox(width: 16),
-
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    materi['judul'] ?? 'Judul kosong',
-                    style: GoogleFonts.poppins(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF2D3748),
-                    ),
-                  ),
-                  SizedBox(height: 4),
-                  Text(
-                    'Tap untuk membaca materi',
-                    style: GoogleFonts.poppins(
-                      fontSize: 12,
-                      color: Color(0xFF718096),
-                    ),
-                  ),
-                ],
+            if (isSelected) ...[
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: GoogleFonts.poppins(
+                  color: _primaryColor,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-            ),
-
-            Container(
-              padding: EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: colorPair[0].withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(
-                Icons.arrow_forward_ios_rounded,
-                color: colorPair[0],
-                size: 16,
-              ),
-            ),
+            ],
           ],
         ),
       ),

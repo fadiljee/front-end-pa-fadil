@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:ayobitung/screens/home_screen.dart';
 
 class QuizScreen extends StatefulWidget {
   final int kuisId;
@@ -93,13 +94,13 @@ class _QuizScreenState extends State<QuizScreen> with TickerProviderStateMixin {
         _updateProgress();
       } else {
         setState(() {
-          errorMessage = 'Gagal mengambil data kuis. Status code: ${response.statusCode}';
+          errorMessage = 'Kuis Belum Ditambahkan';
           isLoading = false;
         });
       }
     } catch (e) {
       setState(() {
-        errorMessage = 'Terjadi kesalahan saat mengambil data: $e';
+        errorMessage = 'Kuis Belum Ditambahkan';
         isLoading = false;
       });
     }
@@ -135,7 +136,7 @@ class _QuizScreenState extends State<QuizScreen> with TickerProviderStateMixin {
       print('Error kirim hasil kuis: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('Gagal mengirim hasil kuis'),
+          content: const Text('Anda Telah Mengerjakan kuis ini'),
           backgroundColor: Colors.red.shade400,
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -969,7 +970,7 @@ class _QuizResultScreenState extends State<QuizResultScreen>
     );
   }
 
-  Widget _buildActionButtons() {
+   Widget _buildActionButtons() {
     return Column(
       children: [
         SizedBox(
@@ -985,8 +986,24 @@ class _QuizResultScreenState extends State<QuizResultScreen>
               elevation: 8,
               shadowColor: const Color(0xFF6366F1).withOpacity(0.4),
             ),
-            onPressed: () {
-              Navigator.popUntil(context, (route) => route.isFirst);
+            // --- PERUBAHAN UTAMA DI SINI ---
+            onPressed: () async {
+              // Ambil data user yang tersimpan untuk dikirim kembali ke HomeScreen
+              final prefs = await SharedPreferences.getInstance();
+              final userName = prefs.getString('userName') ?? 'Siswa'; // Beri nilai default
+              final nisn = prefs.getString('nisn') ?? ''; // Beri nilai default
+
+              // Navigasi ke HomeScreen dan hapus semua halaman sebelumnya
+              Navigator.pushAndRemoveUntil(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => HomeScreen(
+                    userName: userName,
+                    nisn: nisn,
+                  ),
+                ),
+                (Route<dynamic> route) => false, // Predikat ini akan menghapus semua route sebelumnya
+              );
             },
             child: const Row(
               mainAxisAlignment: MainAxisAlignment.center,
