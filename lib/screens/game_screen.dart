@@ -344,7 +344,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     });
     _playerController.forward(from: 0);
     _showCustomSnackBar(
-      "👍 Player $currentPlayer maju ke kotak $newPos",
+      "👍 Pemail $currentPlayer maju ke kotak $newPos",
       Colors.green,
     );
     await Future.delayed(const Duration(milliseconds: 600));
@@ -419,7 +419,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     setState(() {
       currentPlayer = (currentPlayer == 1) ? 2 : 1;
     });
-    _showCustomSnackBar("🔄 Giliran Player $currentPlayer", Colors.blueGrey);
+    _showCustomSnackBar("🔄 Giliran Pemain $currentPlayer", Colors.blueGrey);
   }
 
   // Menampilkan dialog pertanyaan
@@ -577,7 +577,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
                   const Icon(Icons.emoji_events, size: 80, color: Colors.white),
                   const SizedBox(height: 16),
                   Text(
-                    "✨ SELAMAT PLAYER $player! ✨",
+                    "✨ SELAMAT PEMAIN $player! ✨",
                     textAlign: TextAlign.center,
                     style: const TextStyle(
                       fontSize: 24,
@@ -755,7 +755,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
                 style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
               ),
               Text(
-                'Lempar dadu, jawab soal, dan capai garis finis!',
+                'Lempar dadu, jawab soal, dan menangkan game!',
                 style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
               ),
               const SizedBox(height: 8), // Sedikit ruang tambahan
@@ -969,7 +969,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
           children: [
             _buildStatusColumn(
               icon: Icons.person,
-              label: "Player 1",
+              label: "Pemain 1",
               value: player1Position.toString(),
               color: Colors.blue.shade700,
               isActive: currentPlayer == 1,
@@ -977,7 +977,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
             if (isTwoPlayer)
               _buildStatusColumn(
                 icon: Icons.person,
-                label: "Player 2",
+                label: "Pemain 2",
                 value: player2Position.toString(),
                 color: Colors.red.shade700,
                 isActive: currentPlayer == 2,
