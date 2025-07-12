@@ -27,27 +27,47 @@ class _WelcomeScreenState extends State<WelcomeScreen>
   void initState() {
     super.initState();
 
-    _fadeController =
-        AnimationController(vsync: this, duration: const Duration(milliseconds: 1500));
-    _fadeAnimation = CurvedAnimation(parent: _fadeController, curve: Curves.easeOutCubic);
+    _fadeController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    );
+    _fadeAnimation = CurvedAnimation(
+      parent: _fadeController,
+      curve: Curves.easeOutCubic,
+    );
 
-    _slideController =
-        AnimationController(vsync: this, duration: const Duration(milliseconds: 1200));
-    _slideAnimation = Tween<Offset>(begin: const Offset(0, 0.3), end: Offset.zero)
-        .animate(CurvedAnimation(parent: _slideController, curve: Curves.elasticOut));
+    _slideController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    );
+    _slideAnimation = Tween<Offset>(
+      begin: const Offset(0, 0.3),
+      end: Offset.zero,
+    ).animate(
+      CurvedAnimation(parent: _slideController, curve: Curves.elasticOut),
+    );
 
-    _pulseController =
-        AnimationController(vsync: this, duration: const Duration(seconds: 2));
-    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.1)
-        .animate(CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut));
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    );
+    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.1).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
 
-    _floatingController =
-        AnimationController(vsync: this, duration: const Duration(seconds: 4));
-    _floatingAnimation = Tween<double>(begin: -10, end: 10)
-        .animate(CurvedAnimation(parent: _floatingController, curve: Curves.easeInOut));
+    _floatingController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 4),
+    );
+    _floatingAnimation = Tween<double>(begin: -10, end: 10).animate(
+      CurvedAnimation(parent: _floatingController, curve: Curves.easeInOut),
+    );
 
     _fadeController.forward();
-    Future.delayed(const Duration(milliseconds: 300), () => _slideController.forward());
+    Future.delayed(
+      const Duration(milliseconds: 300),
+      () => _slideController.forward(),
+    );
     _pulseController.repeat(reverse: true);
     _floatingController.repeat(reverse: true);
   }
@@ -60,7 +80,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
     _floatingController.dispose();
     super.dispose();
   }
-  
+
   // --- UI Builder Methods ---
 
   /// Membangun elemen lingkaran yang mengambang di latar belakang
@@ -102,7 +122,10 @@ class _WelcomeScreenState extends State<WelcomeScreen>
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               gradient: LinearGradient(
-                colors: [Colors.white.withOpacity(0.3), Colors.white.withOpacity(0.1)],
+                colors: [
+                  Colors.white.withOpacity(0.3),
+                  Colors.white.withOpacity(0.1),
+                ],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
@@ -139,11 +162,12 @@ class _WelcomeScreenState extends State<WelcomeScreen>
     return Column(
       children: [
         ShaderMask(
-          shaderCallback: (bounds) => const LinearGradient(
-            colors: [Colors.white, Colors.white70],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ).createShader(bounds),
+          shaderCallback:
+              (bounds) => const LinearGradient(
+                colors: [Colors.white, Colors.white70],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+              ).createShader(bounds),
           child: Text(
             'SELAMAT DATANG!',
             textAlign: TextAlign.center,
@@ -183,14 +207,24 @@ class _WelcomeScreenState extends State<WelcomeScreen>
       onTap: () {
         Navigator.of(context).push(
           PageRouteBuilder(
-            pageBuilder: (context, animation, secondaryAnimation) => NameInputScreen(),
-            transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            pageBuilder:
+                (context, animation, secondaryAnimation) => NameInputScreen(),
+            transitionsBuilder: (
+              context,
+              animation,
+              secondaryAnimation,
+              child,
+            ) {
               return SlideTransition(
-                position: Tween<Offset>(begin: const Offset(1.0, 0.0), end: Offset.zero)
-                    .animate(CurvedAnimation(
-                  parent: animation,
-                  curve: Curves.easeInOutCubic,
-                )),
+                position: Tween<Offset>(
+                  begin: const Offset(1.0, 0.0),
+                  end: Offset.zero,
+                ).animate(
+                  CurvedAnimation(
+                    parent: animation,
+                    curve: Curves.easeInOutCubic,
+                  ),
+                ),
                 child: child,
               );
             },
@@ -233,7 +267,11 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                 ),
               ),
               const SizedBox(width: 12),
-              const Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 24),
+              const Icon(
+                Icons.arrow_forward_rounded,
+                color: Colors.white,
+                size: 24,
+              ),
             ],
           ),
         ),
@@ -280,12 +318,16 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                             children: List.generate(
                               3,
                               (index) => Container(
-                                margin: const EdgeInsets.symmetric(horizontal: 4),
+                                margin: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                ),
                                 width: 8,
                                 height: 8,
                                 decoration: BoxDecoration(
                                   shape: BoxShape.circle,
-                                  color: Colors.white.withOpacity(index == 0 ? 0.8 : 0.3),
+                                  color: Colors.white.withOpacity(
+                                    index == 0 ? 0.8 : 0.3,
+                                  ),
                                 ),
                               ),
                             ),

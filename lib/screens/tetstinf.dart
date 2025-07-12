@@ -34,7 +34,7 @@
 //   }
 
 //   Future<List<dynamic>> fetchMateri() async {
-//     final response = await http.get(Uri.parse('http://114.125.252.103:8000/api/materi')); // Ganti dengan IP lokal Anda
+//     final response = await http.get(Uri.parse('http://127.0.0.1:8000/api/materi')); // Ganti dengan IP lokal Anda
 
 //     if (response.statusCode == 200) {
 //       return json.decode(response.body);

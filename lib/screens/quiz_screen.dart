@@ -32,21 +32,35 @@ class _QuizScreenState extends State<QuizScreen> with TickerProviderStateMixin {
   void initState() {
     super.initState();
     fetchQuizData();
-    
-    _slideController = AnimationController(vsync: this, duration: const Duration(milliseconds: 600));
-    _fadeController = AnimationController(vsync: this, duration: const Duration(milliseconds: 400));
-    _progressController = AnimationController(vsync: this, duration: const Duration(milliseconds: 800));
-    
+
+    _slideController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    );
+    _fadeController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 400),
+    );
+    _progressController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    );
+
     _slideAnimation = Tween<Offset>(
       begin: const Offset(1.0, 0.0),
       end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _slideController, curve: Curves.easeOutCubic));
-    
-    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0)
-        .animate(CurvedAnimation(parent: _fadeController, curve: Curves.easeIn));
-        
-    _progressAnimation = Tween<double>(begin: 0.0, end: 1.0)
-        .animate(CurvedAnimation(parent: _progressController, curve: Curves.easeInOut));
+    ).animate(
+      CurvedAnimation(parent: _slideController, curve: Curves.easeOutCubic),
+    );
+
+    _fadeAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(parent: _fadeController, curve: Curves.easeIn));
+
+    _progressAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _progressController, curve: Curves.easeInOut),
+    );
   }
 
   @override
@@ -94,13 +108,13 @@ class _QuizScreenState extends State<QuizScreen> with TickerProviderStateMixin {
         _updateProgress();
       } else {
         setState(() {
-          errorMessage = 'Kuis Belum Ditambahkan';
+          errorMessage = 'Kuis tidak ditemukan.';
           isLoading = false;
         });
       }
     } catch (e) {
       setState(() {
-        errorMessage = 'Kuis Belum Ditambahkan';
+        errorMessage = 'Terjadi kesalahan saat memuat kuis.';
         isLoading = false;
       });
     }
@@ -123,10 +137,7 @@ class _QuizScreenState extends State<QuizScreen> with TickerProviderStateMixin {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
         },
-        body: jsonEncode({
-          'kuis_id': kuisId,
-          'jawaban_user': jawabanUser,
-        }),
+        body: jsonEncode({'kuis_id': kuisId, 'jawaban_user': jawabanUser}),
       );
 
       if (response.statusCode != 200) {
@@ -139,9 +150,33 @@ class _QuizScreenState extends State<QuizScreen> with TickerProviderStateMixin {
           content: const Text('Anda Telah Mengerjakan kuis ini'),
           backgroundColor: Colors.red.shade400,
           behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
         ),
       );
+    }
+  }
+
+  Future<void> unlockNextMateri(int materiId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('token');
+    if (token == null) return;
+
+    final response = await http.post(
+      Uri.parse('http://127.0.0.1:8000/api/unlock-next-materi'),
+      headers: {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({'materi_id': materiId}),
+    );
+
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      print('Unlock materi: ${data['message']}');
+    } else {
+      print('Gagal unlock materi berikutnya');
     }
   }
 
@@ -167,6 +202,8 @@ class _QuizScreenState extends State<QuizScreen> with TickerProviderStateMixin {
       'jawaban_benar': soal['jawaban_benar'],
       'jawaban_user': jawabanUser,
       'skor': skor,
+      'pembahasan': soal['pembahasan'] ?? '',
+      'materi_id': soal['materi_id'], // Pastikan materi_id tersedia
     });
 
     if (currentQuestionIndex < questions.length - 1) {
@@ -178,17 +215,36 @@ class _QuizScreenState extends State<QuizScreen> with TickerProviderStateMixin {
       _updateProgress();
       await _slideController.forward();
     } else {
+      // Unlock materi berikutnya jika nilai >= 70%
+      int totalSkor = hasilKuisData.fold(
+        0,
+        (prev, item) => prev + (item['skor'] as int),
+      );
+      int maxSkor = questions.fold(
+        0,
+        (prev, item) => prev + ((item['nilai'] ?? 10) as int),
+      );
+      double percentage = (totalSkor / maxSkor) * 100;
+
+      if (percentage >= 70 && hasilKuisData.isNotEmpty) {
+        final materiId = hasilKuisData[0]['materi_id'] as int;
+        await unlockNextMateri(materiId);
+      }
+
       Navigator.pushReplacement(
         context,
         PageRouteBuilder(
-          pageBuilder: (context, animation, secondaryAnimation) => 
-              QuizResultScreen(kuisData: hasilKuisData),
+          pageBuilder:
+              (context, animation, secondaryAnimation) =>
+                  QuizResultScreen(kuisData: hasilKuisData),
           transitionsBuilder: (context, animation, secondaryAnimation, child) {
             return SlideTransition(
               position: Tween<Offset>(
                 begin: const Offset(1.0, 0.0),
                 end: Offset.zero,
-              ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic)),
+              ).animate(
+                CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
+              ),
               child: child,
             );
           },
@@ -203,24 +259,25 @@ class _QuizScreenState extends State<QuizScreen> with TickerProviderStateMixin {
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       body: SafeArea(
-        child: isLoading
-            ? _buildLoadingState()
-            : errorMessage.isNotEmpty
+        child:
+            isLoading
+                ? _buildLoadingState()
+                : errorMessage.isNotEmpty
                 ? _buildErrorState()
                 : Column(
-                    children: [
-                      _buildHeader(),
-                      Expanded(
-                        child: SlideTransition(
-                          position: _slideAnimation,
-                          child: FadeTransition(
-                            opacity: _fadeAnimation,
-                            child: _buildQuizContent(),
-                          ),
+                  children: [
+                    _buildHeader(),
+                    Expanded(
+                      child: SlideTransition(
+                        position: _slideAnimation,
+                        child: FadeTransition(
+                          opacity: _fadeAnimation,
+                          child: _buildQuizContent(),
                         ),
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
+                ),
       ),
     );
   }
@@ -281,11 +338,7 @@ class _QuizScreenState extends State<QuizScreen> with TickerProviderStateMixin {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              Icons.error_outline,
-              size: 64,
-              color: Colors.red.shade400,
-            ),
+            Icon(Icons.error_outline, size: 64, color: Colors.red.shade400),
             const SizedBox(height: 16),
             Text(
               'Oops! Terjadi Kesalahan',
@@ -299,10 +352,7 @@ class _QuizScreenState extends State<QuizScreen> with TickerProviderStateMixin {
             Text(
               errorMessage,
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 14,
-                color: Color(0xFF64748B),
-              ),
+              style: const TextStyle(fontSize: 14, color: Color(0xFF64748B)),
             ),
             const SizedBox(height: 24),
             ElevatedButton(
@@ -310,7 +360,10 @@ class _QuizScreenState extends State<QuizScreen> with TickerProviderStateMixin {
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.red.shade400,
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 12,
+                ),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
@@ -368,7 +421,10 @@ class _QuizScreenState extends State<QuizScreen> with TickerProviderStateMixin {
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.white.withOpacity(0.2),
                   borderRadius: BorderRadius.circular(20),
@@ -438,7 +494,6 @@ class _QuizScreenState extends State<QuizScreen> with TickerProviderStateMixin {
           BoxShadow(
             color: const Color(0xFF6366F1).withOpacity(0.1),
             blurRadius: 25,
-            spreadRadius: 0,
             offset: const Offset(0, 10),
           ),
         ],
@@ -454,9 +509,9 @@ class _QuizScreenState extends State<QuizScreen> with TickerProviderStateMixin {
               ),
               borderRadius: BorderRadius.circular(20),
             ),
-            child: Text(
+            child: const Text(
               'PERTANYAAN',
-              style: const TextStyle(
+              style: TextStyle(
                 color: Colors.white,
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
@@ -482,13 +537,13 @@ class _QuizScreenState extends State<QuizScreen> with TickerProviderStateMixin {
   Widget _buildAnswerChoices() {
     final options = ['jawaban_a', 'jawaban_b', 'jawaban_c', 'jawaban_d'];
     final labels = ['A', 'B', 'C', 'D'];
-    
+
     return Column(
       children: List.generate(options.length, (index) {
         final option = options[index];
         final label = labels[index];
         final isSelected = selectedAnswer == option;
-        
+
         return Padding(
           padding: const EdgeInsets.only(bottom: 16),
           child: AnimatedContainer(
@@ -497,16 +552,19 @@ class _QuizScreenState extends State<QuizScreen> with TickerProviderStateMixin {
               color: isSelected ? const Color(0xFF6366F1) : Colors.white,
               borderRadius: BorderRadius.circular(20),
               border: Border.all(
-                color: isSelected ? const Color(0xFF6366F1) : const Color(0xFFE2E8F0),
+                color:
+                    isSelected
+                        ? const Color(0xFF6366F1)
+                        : const Color(0xFFE2E8F0),
                 width: 2,
               ),
               boxShadow: [
                 BoxShadow(
-                  color: isSelected 
-                      ? const Color(0xFF6366F1).withOpacity(0.3)
-                      : Colors.black.withOpacity(0.05),
+                  color:
+                      isSelected
+                          ? const Color(0xFF6366F1).withOpacity(0.3)
+                          : Colors.black.withOpacity(0.05),
                   blurRadius: isSelected ? 15 : 10,
-                  spreadRadius: 0,
                   offset: const Offset(0, 5),
                 ),
               ],
@@ -528,14 +586,20 @@ class _QuizScreenState extends State<QuizScreen> with TickerProviderStateMixin {
                         width: 32,
                         height: 32,
                         decoration: BoxDecoration(
-                          color: isSelected ? Colors.white : const Color(0xFF6366F1),
+                          color:
+                              isSelected
+                                  ? Colors.white
+                                  : const Color(0xFF6366F1),
                           shape: BoxShape.circle,
                         ),
                         child: Center(
                           child: Text(
                             label,
                             style: TextStyle(
-                              color: isSelected ? const Color(0xFF6366F1) : Colors.white,
+                              color:
+                                  isSelected
+                                      ? const Color(0xFF6366F1)
+                                      : Colors.white,
                               fontSize: 16,
                               fontWeight: FontWeight.bold,
                             ),
@@ -549,7 +613,10 @@ class _QuizScreenState extends State<QuizScreen> with TickerProviderStateMixin {
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w500,
-                            color: isSelected ? Colors.white : const Color(0xFF1E293B),
+                            color:
+                                isSelected
+                                    ? Colors.white
+                                    : const Color(0xFF1E293B),
                           ),
                         ),
                       ),
@@ -567,15 +634,18 @@ class _QuizScreenState extends State<QuizScreen> with TickerProviderStateMixin {
   Widget _buildNextButton() {
     final isEnabled = selectedAnswer.isNotEmpty;
     final isLastQuestion = currentQuestionIndex == questions.length - 1;
-    
+
     return AnimatedContainer(
       duration: const Duration(milliseconds: 300),
       child: ElevatedButton(
         style: ElevatedButton.styleFrom(
-          backgroundColor: isEnabled ? const Color(0xFF6366F1) : const Color(0xFFE2E8F0),
+          backgroundColor:
+              isEnabled ? const Color(0xFF6366F1) : const Color(0xFFE2E8F0),
           foregroundColor: Colors.white,
           padding: const EdgeInsets.symmetric(vertical: 18),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           elevation: isEnabled ? 8 : 0,
           shadowColor: const Color(0xFF6366F1).withOpacity(0.4),
         ),
@@ -612,12 +682,12 @@ class QuizResultScreen extends StatefulWidget {
   _QuizResultScreenState createState() => _QuizResultScreenState();
 }
 
-class _QuizResultScreenState extends State<QuizResultScreen> 
+class _QuizResultScreenState extends State<QuizResultScreen>
     with TickerProviderStateMixin {
   late AnimationController _confettiController;
   late AnimationController _scoreController;
   late Animation<double> _scoreAnimation;
-  
+
   @override
   void initState() {
     super.initState();
@@ -632,7 +702,7 @@ class _QuizResultScreenState extends State<QuizResultScreen>
     _scoreAnimation = Tween<double>(begin: 0, end: 1).animate(
       CurvedAnimation(parent: _scoreController, curve: Curves.easeOutBack),
     );
-    
+
     _confettiController.forward();
     _scoreController.forward();
   }
@@ -645,7 +715,10 @@ class _QuizResultScreenState extends State<QuizResultScreen>
   }
 
   int get totalScore {
-    return widget.kuisData.fold<int>(0, (sum, item) => sum + ((item['skor'] ?? 0) as int));
+    return widget.kuisData.fold<int>(
+      0,
+      (sum, item) => sum + ((item['skor'] ?? 0) as int),
+    );
   }
 
   int get correctAnswers {
@@ -712,8 +785,8 @@ class _QuizResultScreenState extends State<QuizResultScreen>
                   percentage >= 80
                       ? Icons.emoji_events
                       : percentage >= 60
-                          ? Icons.thumb_up
-                          : Icons.psychology,
+                      ? Icons.thumb_up
+                      : Icons.psychology,
                   size: 40,
                   color: Colors.white,
                 ),
@@ -733,10 +806,7 @@ class _QuizResultScreenState extends State<QuizResultScreen>
         const SizedBox(height: 8),
         const Text(
           'Kuis Telah Selesai',
-          style: TextStyle(
-            fontSize: 16,
-            color: Color(0xFF64748B),
-          ),
+          style: TextStyle(fontSize: 16, color: Color(0xFF64748B)),
         ),
       ],
     );
@@ -761,7 +831,6 @@ class _QuizResultScreenState extends State<QuizResultScreen>
                 BoxShadow(
                   color: scoreColor.withOpacity(0.3),
                   blurRadius: 25,
-                  spreadRadius: 0,
                   offset: const Offset(0, 10),
                 ),
               ],
@@ -787,7 +856,10 @@ class _QuizResultScreenState extends State<QuizResultScreen>
                 ),
                 const SizedBox(height: 16),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.white.withOpacity(0.2),
                     borderRadius: BorderRadius.circular(20),
@@ -818,7 +890,6 @@ class _QuizResultScreenState extends State<QuizResultScreen>
           BoxShadow(
             color: Colors.black.withOpacity(0.05),
             blurRadius: 20,
-            spreadRadius: 0,
             offset: const Offset(0, 5),
           ),
         ],
@@ -840,7 +911,7 @@ class _QuizResultScreenState extends State<QuizResultScreen>
           ...List.generate(widget.kuisData.length, (index) {
             final soal = widget.kuisData[index];
             final isCorrect = soal['skor'] > 0;
-            
+
             return Container(
               margin: EdgeInsets.only(
                 left: 24,
@@ -849,14 +920,16 @@ class _QuizResultScreenState extends State<QuizResultScreen>
               ),
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: isCorrect 
-                    ? const Color(0xFF10B981).withOpacity(0.1)
-                    : const Color(0xFFEF4444).withOpacity(0.1),
+                color:
+                    isCorrect
+                        ? const Color(0xFF10B981).withOpacity(0.1)
+                        : const Color(0xFFEF4444).withOpacity(0.1),
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(
-                  color: isCorrect 
-                      ? const Color(0xFF10B981).withOpacity(0.3)
-                      : const Color(0xFFEF4444).withOpacity(0.3),
+                  color:
+                      isCorrect
+                          ? const Color(0xFF10B981).withOpacity(0.3)
+                          : const Color(0xFFEF4444).withOpacity(0.3),
                 ),
               ),
               child: Column(
@@ -868,9 +941,10 @@ class _QuizResultScreenState extends State<QuizResultScreen>
                         width: 24,
                         height: 24,
                         decoration: BoxDecoration(
-                          color: isCorrect 
-                              ? const Color(0xFF10B981)
-                              : const Color(0xFFEF4444),
+                          color:
+                              isCorrect
+                                  ? const Color(0xFF10B981)
+                                  : const Color(0xFFEF4444),
                           shape: BoxShape.circle,
                         ),
                         child: Icon(
@@ -886,18 +960,23 @@ class _QuizResultScreenState extends State<QuizResultScreen>
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.bold,
-                            color: isCorrect 
-                                ? const Color(0xFF10B981)
-                                : const Color(0xFFEF4444),
+                            color:
+                                isCorrect
+                                    ? const Color(0xFF10B981)
+                                    : const Color(0xFFEF4444),
                           ),
                         ),
                       ),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
                         decoration: BoxDecoration(
-                          color: isCorrect 
-                              ? const Color(0xFF10B981)
-                              : const Color(0xFFEF4444),
+                          color:
+                              isCorrect
+                                  ? const Color(0xFF10B981)
+                                  : const Color(0xFFEF4444),
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Text(
@@ -954,12 +1033,30 @@ class _QuizResultScreenState extends State<QuizResultScreen>
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
-                          color: isCorrect 
-                              ? const Color(0xFF10B981)
-                              : const Color(0xFFEF4444),
+                          color:
+                              isCorrect
+                                  ? const Color(0xFF10B981)
+                                  : const Color(0xFFEF4444),
                         ),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Pembahasan:',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF64748B),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    soal['pembahasan'] ?? 'Tidak ada pembahasan tersedia.',
+                    style: const TextStyle(
+                      fontSize: 14,
+                      color: Color(0xFF1E293B),
+                    ),
                   ),
                 ],
               ),
@@ -970,7 +1067,7 @@ class _QuizResultScreenState extends State<QuizResultScreen>
     );
   }
 
-   Widget _buildActionButtons() {
+  Widget _buildActionButtons() {
     return Column(
       children: [
         SizedBox(
@@ -986,23 +1083,50 @@ class _QuizResultScreenState extends State<QuizResultScreen>
               elevation: 8,
               shadowColor: const Color(0xFF6366F1).withOpacity(0.4),
             ),
-            // --- PERUBAHAN UTAMA DI SINI ---
             onPressed: () async {
-              // Ambil data user yang tersimpan untuk dikirim kembali ke HomeScreen
               final prefs = await SharedPreferences.getInstance();
-              final userName = prefs.getString('userName') ?? 'Siswa'; // Beri nilai default
-              final nisn = prefs.getString('nisn') ?? ''; // Beri nilai default
+              final userName = prefs.getString('userName') ?? 'Siswa';
+              final nisn = prefs.getString('nisn') ?? '';
+              final token = prefs.getString('token');
 
-              // Navigasi ke HomeScreen dan hapus semua halaman sebelumnya
-              Navigator.pushAndRemoveUntil(
+              if (percentage >= 70) {
+                int materiId =
+                    widget.kuisData.isNotEmpty &&
+                            widget.kuisData[0].containsKey('materi_id')
+                        ? widget.kuisData[0]['materi_id'] as int
+                        : 0;
+
+                if (materiId > 0) {
+                  // Unlock sudah dilakukan di QuizScreen,
+                  // langsung push HomeScreen dengan UniqueKey agar reload state dan data SharedPreferences
+                  Navigator.pushReplacement(
+                    context,
+                    MaterialPageRoute(
+                      builder:
+                          (context) => HomeScreen(
+                            key: UniqueKey(),
+                            userName: userName,
+                            nisn: nisn,
+                            token: token,
+                          ),
+                    ),
+                  );
+                  return;
+                }
+              }
+
+              // Jika skor kurang dari 70 atau materiId tidak valid,
+              Navigator.pushReplacement(
                 context,
                 MaterialPageRoute(
-                  builder: (context) => HomeScreen(
-                    userName: userName,
-                    nisn: nisn,
-                  ),
+                  builder:
+                      (context) => HomeScreen(
+                        key: UniqueKey(),
+                        userName: userName,
+                        nisn: nisn,
+                        token: token,
+                      ),
                 ),
-                (Route<dynamic> route) => false, // Predikat ini akan menghapus semua route sebelumnya
               );
             },
             child: const Row(
@@ -1012,157 +1136,13 @@ class _QuizResultScreenState extends State<QuizResultScreen>
                 SizedBox(width: 8),
                 Text(
                   'Kembali ke Beranda',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 16),
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton(
-            style: OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFF64748B),
-              side: const BorderSide(color: Color(0xFFE2E8F0), width: 2),
-              padding: const EdgeInsets.symmetric(vertical: 18),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-            ),
-            onPressed: () {
-              _showShareDialog();
-            },
-            child: const Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.share),
-                SizedBox(width: 8),
-                Text(
-                  'Bagikan Hasil',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
               ],
             ),
           ),
         ),
       ],
-    );
-  }
-
-  void _showShareDialog() {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return Dialog(
-          backgroundColor: Colors.transparent,
-          child: Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
-                  blurRadius: 20,
-                  spreadRadius: 5,
-                ),
-              ],
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 60,
-                  height: 60,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [scoreColor, scoreColor.withOpacity(0.7)],
-                    ),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.share,
-                    size: 30,
-                    color: Colors.white,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  'Bagikan Pencapaian Anda!',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF1E293B),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Saya berhasil menjawab $correctAnswers dari ${widget.kuisData.length} pertanyaan dengan benar (${percentage.toInt()}%)',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    color: Color(0xFF64748B),
-                  ),
-                ),
-                const SizedBox(height: 24),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () => Navigator.pop(context),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: const Color(0xFF64748B),
-                          side: const BorderSide(color: Color(0xFFE2E8F0)),
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        child: const Text('Batal'),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: ElevatedButton(
-                        onPressed: () {
-                          // Implement share functionality here
-                          Navigator.pop(context);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: const Text('Hasil berhasil dibagikan!'),
-                              backgroundColor: scoreColor,
-                              behavior: SnackBarBehavior.floating,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                            ),
-                          );
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: scoreColor,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        child: const Text('Bagikan'),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        );
-      },
     );
   }
 }

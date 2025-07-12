@@ -1,5 +1,3 @@
-// home_screen.dart
-
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -11,10 +9,10 @@ import 'game_screen.dart';
 import 'profile_screen.dart';
 import 'materi_detail_screen.dart';
 
-// Tambahkan konstanta warna utama
+// Warna utama
 const Color _primaryColor = Color(0xFF6B73FF);
 const Color _textColorSecondary = Color(0xFF718096);
-const Color _lockedColor = Color(0xFFCBD5E0); // Warna untuk item yang terkunci
+const Color _lockedColor = Color(0xFFCBD5E0);
 
 class HomeScreen extends StatefulWidget {
   final String userName;
@@ -38,6 +36,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   String? _token;
 
   Set<int> _completedMateriIds = {};
+  Set<int> _unlockedMateriIds = {};
 
   late AnimationController _pageLoadController;
   late Animation<double> _headerAnimation;
@@ -49,12 +48,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   void initState() {
     super.initState();
     _initializeAnimations();
-    _loadInitialData();
+    _loadInitialData(); // Load token, unlock materi & materi progress
   }
 
   Future<void> _loadInitialData() async {
     await _loadToken();
-    await _loadMateriProgress(); // Muat progress sebelum fetch materi
+    await _loadUnlockedMateriFromApi();
+    await _loadMateriProgress();
     if (mounted) {
       setState(() {
         _futureMateri = fetchMateri();
@@ -62,38 +62,88 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
   }
 
-  // --- FUNGSI UNTUK MEMUAT PROGRESS MATERI DARI SHAIZREDPREFERENCES ---
-  Future<void> _loadMateriProgress() async {
+  Future<void> _loadToken() async {
     final prefs = await SharedPreferences.getInstance();
+    _token = widget.token ?? prefs.getString('token');
+  }
 
-    // MODIFIKASI: Buat kunci yang unik untuk setiap siswa menggunakan NISN
-    final progressKey = 'completedMateriIds_${widget.nisn}';
+  Future<void> _loadUnlockedMateriFromApi() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (_token == null) return;
 
-    // Baca daftar ID yang sudah selesai menggunakan kunci unik tersebut
-    final completedIdsStr = prefs.getStringList(progressKey) ?? [];
+    final url = Uri.parse('http://127.0.0.1:8000/api/materi-unlock');
+    final response = await http.get(
+      url,
+      headers: {'Authorization': 'Bearer $_token'},
+    );
 
-    final completedIds = completedIdsStr.map((id) => int.parse(id)).toSet();
-    if (mounted) {
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      final unlockedIds =
+          (data['unlocked_materi_ids'] as List<dynamic>)
+              .map((e) => e as int)
+              .toList();
+
+      // Simpan ke SharedPreferences
+      await prefs.setStringList(
+        'unlockedMateriIds_${widget.nisn}',
+        unlockedIds.map((e) => e.toString()).toList(),
+      );
+
       setState(() {
-        _completedMateriIds = completedIds;
+        _unlockedMateriIds = unlockedIds.toSet();
       });
     }
   }
 
-  // --- FUNGSI UNTUK MENANDAI MATERI SEBAGAI SELESAI ---
+  Future<void> _loadMateriProgress() async {
+    final prefs = await SharedPreferences.getInstance();
+    final completedKey = 'completedMateriIds_${widget.nisn}';
+    final unlockedKey = 'unlockedMateriIds_${widget.nisn}';
+
+    final completedIdsStr = prefs.getStringList(completedKey) ?? [];
+    final completedIds = completedIdsStr.map(int.parse).toSet();
+
+    final unlockedIdsStr =
+        prefs.getStringList(unlockedKey) ?? ['1']; // unlock materi 1 by default
+    final unlockedIds = unlockedIdsStr.map(int.parse).toSet();
+
+    if (mounted) {
+      setState(() {
+        _completedMateriIds = completedIds;
+        _unlockedMateriIds = unlockedIds;
+      });
+    }
+  }
+
+  Future<List<dynamic>> fetchMateri() async {
+    if (_token == null) {
+      throw Exception('Token tidak ditemukan. Silakan login kembali.');
+    }
+
+    final url = Uri.parse('http://127.0.0.1:8000/api/materi');
+    final response = await http.get(
+      url,
+      headers: {'Authorization': 'Bearer $_token'},
+    );
+
+    if (response.statusCode == 200) {
+      final decoded = json.decode(response.body);
+      return decoded as List<dynamic>;
+    } else {
+      throw Exception('Gagal memuat materi (status ${response.statusCode})');
+    }
+  }
+
   Future<void> _markMateriAsCompleted(int materiId) async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
       _completedMateriIds.add(materiId);
     });
 
-    // MODIFIKASI: Buat kunci yang unik untuk setiap siswa menggunakan NISN
     final progressKey = 'completedMateriIds_${widget.nisn}';
-
     final completedIdsStr =
-        _completedMateriIds.map((id) => id.toString()).toList();
-
-    // Simpan kembali ke SharedPreferences menggunakan kunci unik tersebut
+        _completedMateriIds.map((e) => e.toString()).toList();
     await prefs.setStringList(progressKey, completedIdsStr);
   }
 
@@ -133,30 +183,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     super.dispose();
   }
 
-  Future<void> _loadToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    _token = widget.token ?? prefs.getString('token');
-  }
-
-  Future<List<dynamic>> fetchMateri() async {
-    if (_token == null) {
-      throw Exception('Token tidak ditemukan. Silakan login kembali.');
-    }
-
-    final url = Uri.parse('http://114.125.252.103:8000/api/materi');
-    final response = await http.get(
-      url,
-      headers: {'Authorization': 'Bearer $_token'},
-    );
-
-    if (response.statusCode == 200) {
-      final decoded = json.decode(response.body);
-      return decoded as List<dynamic>;
-    } else {
-      throw Exception('Gagal memuat materi (status ${response.statusCode})');
-    }
-  }
-
   void _onItemTapped(int index) {
     HapticFeedback.lightImpact();
     if (index == _selectedIndex) return;
@@ -169,7 +195,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           Navigator.pushReplacement(
             context,
             _createRoute(
-              SnakesLaddersQuiz(userName: widget.userName, nisn: widget.nisn),
+              GamePage(userName: widget.userName, nisn: widget.nisn),
             ),
           );
         }
@@ -340,7 +366,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 Expanded(
                   child: _buildStatCard(
                     'Materi',
-                    '12',
+                    '4',
                     Icons.book_rounded,
                     const Color(0xFFFFB74D),
                   ),
@@ -479,6 +505,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               }
 
               final materiList = snapshot.data!;
+              materiList.sort(
+                (a, b) => (a['id'] as int).compareTo(b['id'] as int),
+              );
+
               return FadeTransition(
                 opacity: _materiListAnimation,
                 child: ListView.builder(
@@ -487,12 +517,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   itemCount: materiList.length,
                   itemBuilder: (context, index) {
                     final materi = materiList[index];
-
                     final bool isLocked =
-                        index > 0 &&
-                        !_completedMateriIds.contains(
-                          materiList[index - 1]['id'],
-                        );
+                        !_unlockedMateriIds.contains(materi['id'] as int);
 
                     return SlideTransition(
                       position: Tween<Offset>(

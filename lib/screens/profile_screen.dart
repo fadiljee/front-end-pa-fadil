@@ -6,10 +6,11 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'home_screen.dart';
 
-// --- Model Siswa (Sama seperti asli) ---
+// --- Model Siswa (dengan kelas) ---
 class Siswa {
   final String nama;
   final String nisn;
+  final String? kelas; // Tambah kelas
   final String? profilePictureUrl;
   final String? sekolah;
   final String? alamat;
@@ -17,6 +18,7 @@ class Siswa {
   Siswa({
     required this.nama,
     required this.nisn,
+    this.kelas,
     this.profilePictureUrl,
     this.sekolah,
     this.alamat,
@@ -26,6 +28,7 @@ class Siswa {
     return Siswa(
       nama: json['nama'] ?? 'Pengguna',
       nisn: json['nisn']?.toString() ?? defaultNisn,
+      kelas: json['kelas'], // parse kelas
       profilePictureUrl: json['profile_picture'],
       sekolah: json['sekolah'] ?? 'SMP Negeri 1 Merawang',
       alamat: json['alamat'] ?? 'Merawang, Bangka Belitung',
@@ -194,7 +197,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   Future<void> _fetchUserStats(String token) async {
     try {
       final response = await http.get(
-        Uri.parse('http://114.125.252.103:8000/api/user/stats'),
+        Uri.parse('http://127.0.0.1:8000/api/user/stats'),
         headers: {
           'Authorization': 'Bearer $token',
           'Accept': 'application/json',
@@ -224,7 +227,7 @@ class _ProfileScreenState extends State<ProfileScreen>
 
     try {
       final response = await http.post(
-        Uri.parse('http://114.125.252.103:8000/api/login'),
+        Uri.parse('http://127.0.0.1:8000/api/login'),
         body: json.encode({'nisn': widget.nisn}),
         headers: {'Content-Type': 'application/json'},
       );
@@ -465,16 +468,13 @@ class _ProfileScreenState extends State<ProfileScreen>
     );
   }
 
-  // MODIFIKASI: Menggunakan pendekatan InkWell + Container yang lebih bersih
   Widget _buildLogoutButton() {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: _logout, // Panggil fungsi logout
-        borderRadius: BorderRadius.circular(
-          20,
-        ), // Bentuk border untuk efek ripple
-        splashColor: Colors.white.withOpacity(0.2), // Warna efek saat disentuh
+        onTap: _logout,
+        borderRadius: BorderRadius.circular(20),
+        splashColor: Colors.white.withOpacity(0.2),
         highlightColor: Colors.white.withOpacity(0.1),
         child: Ink(
           width: double.infinity,
@@ -574,6 +574,20 @@ class _ProfileScreenState extends State<ProfileScreen>
               color: Color(0xFF2d3748),
             ),
           ),
+
+          // Tampilkan kelas jika ada
+          if (_siswa?.kelas != null && _siswa!.kelas!.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Kelas: ${_siswa!.kelas!}',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: Colors.grey.shade700,
+              ),
+            ),
+          ],
+
           const SizedBox(height: 8),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
