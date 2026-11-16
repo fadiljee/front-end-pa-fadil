@@ -1,16 +1,20 @@
 import 'package:flutter/material.dart';
-import 'screens/welcome_screen.dart';
+import 'core/navigation/navigator_key.dart';
+import 'features/onboarding/welcome_screen.dart';
 
 void main() {
-  runApp(MyApp());
+  runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Ayo Berhitung',
-      home: WelcomeScreen(),
+      navigatorKey: appNavigatorKey,
+      home: const WelcomeScreen(),
     );
   }
 }
