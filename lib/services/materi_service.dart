@@ -1,46 +1,86 @@
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../core/config/supabase_config.dart';
+import '../core/errors/app_exception.dart';
+import '../core/storage/session_store.dart';
 import '../models/materi.dart';
-import 'api_client.dart';
 
 export '../models/materi.dart' show MateriDetail;
 
-/// Layanan domain materi (`GET /materi`, `GET /materi-unlock`, `GET /materi/{id}`).
+/// Layanan domain materi berbasis Supabase (`materi`, `materi_unlock`).
 class MateriService {
-  MateriService({ApiClient? apiClient})
-    : _apiClient = apiClient ?? ApiClient.shared;
+  MateriService({SupabaseClient? client, SessionStore? sessionStore})
+    : _client = client,
+      _sessionStore = sessionStore ?? SessionStore();
 
-  final ApiClient _apiClient;
+  final SupabaseClient? _client;
+  final SessionStore _sessionStore;
+
+  SupabaseClient get _supabase => _client ?? Supabase.instance.client;
 
   /// Mengambil seluruh daftar materi dan mengurutkannya berdasarkan `id` menaik.
   Future<List<Map<String, dynamic>>> getMateriList() async {
-    final data = await _apiClient.get('/materi');
-    if (data is! List) {
-      throw ApiException(message: 'Format daftar materi tidak valid.');
+    try {
+      final rows = await _supabase
+          .from('materi')
+          .select('id, judul')
+          .order('id', ascending: true)
+          .timeout(SupabaseConfig.requestTimeout);
+
+      return List<Map<String, dynamic>>.from(rows);
+    } catch (e) {
+      throw await AppException.fromError(e, sessionStore: _sessionStore);
     }
-    final list = data.whereType<Map<String, dynamic>>().toList();
-    list.sort((a, b) => (a['id'] as int).compareTo(b['id'] as int));
-    return list;
   }
 
   /// Mengambil daftar ID materi yang sudah terbuka untuk siswa saat ini.
   Future<List<int>> getUnlockedMateriIds() async {
-    final data = await _apiClient.get('/materi-unlock');
-    if (data is! Map<String, dynamic>) {
-      return [1];
+    try {
+      final siswaId = await _sessionStore.getSiswaId();
+      if (siswaId == null) return [1];
+
+      final rows = await _supabase
+          .from('materi_unlock')
+          .select('materi_id')
+          .eq('siswa_id', siswaId)
+          .timeout(SupabaseConfig.requestTimeout);
+
+      final ids =
+          (rows as List)
+              .map((row) => int.tryParse(row['materi_id']?.toString() ?? ''))
+              .whereType<int>()
+              .toSet();
+      ids.add(1);
+      final sorted = ids.toList()..sort();
+      return sorted;
+    } catch (e) {
+      throw await AppException.fromError(e, sessionStore: _sessionStore);
     }
-    final raw = data['unlocked_materi_ids'];
-    if (raw is! List) return [1];
-    return raw.map((e) => int.tryParse(e.toString())).whereType<int>().toList();
   }
 
   /// Mengambil detail konten materi berdasarkan [materiId].
   Future<MateriDetail> getMateriDetail(int materiId) async {
-    final data = await _apiClient.get('/materi/$materiId');
-    if (data is! Map<String, dynamic>) {
-      throw ApiException(message: 'Format detail materi tidak valid.');
+    try {
+      final data = await _supabase
+          .from('materi')
+          .select('konten, gambar_url')
+          .eq('id', materiId)
+          .maybeSingle()
+          .timeout(SupabaseConfig.requestTimeout);
+
+      if (data == null) {
+        throw const AppException(
+          statusCode: 404,
+          message: 'Materi tidak ditemukan.',
+        );
+      }
+
+      return MateriDetail(
+        konten: data['konten']?.toString() ?? 'Konten tidak tersedia.',
+        gambarUrl: data['gambar_url']?.toString(),
+      );
+    } catch (e) {
+      throw await AppException.fromError(e, sessionStore: _sessionStore);
     }
-    return MateriDetail(
-      konten: data['konten']?.toString() ?? 'Konten tidak tersedia.',
-      gambarUrl: data['gambar_url']?.toString(),
-    );
   }
 }

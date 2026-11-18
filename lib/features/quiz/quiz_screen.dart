@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../services/api_client.dart';
+import '../../core/errors/app_exception.dart';
 import '../../services/kuis_service.dart';
 import 'quiz_result_screen.dart';
 
@@ -84,7 +84,7 @@ class _QuizScreenState extends State<QuizScreen> with TickerProviderStateMixin {
       _slideController.forward();
       _fadeController.forward();
       _updateProgress();
-    } on ApiException catch (e) {
+    } on AppException catch (e) {
       if (!mounted) return;
       setState(() {
         errorMessage = e.message;
@@ -114,7 +114,7 @@ class _QuizScreenState extends State<QuizScreen> with TickerProviderStateMixin {
         kuisId: kuisId,
         jawabanUser: jawabanUser,
       );
-    } on ApiException catch (e) {
+    } on AppException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
