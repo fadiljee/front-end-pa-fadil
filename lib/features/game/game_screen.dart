@@ -1,11 +1,16 @@
-import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:audioplayers/audioplayers.dart';
-import '../../core/storage/session_store.dart';
 import '../home/home_screen.dart';
-import 'game_question_generator.dart';
+import 'controllers/game_controller.dart';
+import 'dialogs/mode_selection_dialog.dart';
+import 'dialogs/question_dialog.dart';
+import 'dialogs/win_dialog.dart';
+import 'services/game_audio_service.dart';
+import 'widgets/game_board.dart';
+import 'widgets/game_controls.dart';
+import 'widgets/game_snackbar.dart';
+import 'widgets/game_status_card.dart';
 
-// Kelas utama aplikasi, menginisialisasi tema dan halaman utama
+/// Kelas utama aplikasi permainan ular tangga matematika.
 class SnakesLaddersQuiz extends StatelessWidget {
   final String userName;
   final String nisn;
@@ -23,13 +28,10 @@ class SnakesLaddersQuiz extends StatelessWidget {
       theme: ThemeData(
         primarySwatch: Colors.teal,
         useMaterial3: true,
-        fontFamily:
-            'Poppins', // Gunakan font yang lebih modern (tambahkan di pubspec.yaml)
-        scaffoldBackgroundColor: const Color(
-          0xFFF0F8FF,
-        ), // Warna latar belakang yang lembut
+        fontFamily: 'Poppins',
+        scaffoldBackgroundColor: const Color(0xFFF0F8FF),
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF00796B), // Warna dasar tema
+          seedColor: const Color(0xFF00796B),
           brightness: Brightness.light,
           primary: const Color(0xFF00796B),
           secondary: const Color(0xFFFFA000),
@@ -63,7 +65,7 @@ class SnakesLaddersQuiz extends StatelessWidget {
   }
 }
 
-// Halaman utama permainan
+/// Halaman utama permainan ular tangga matematika.
 class GamePage extends StatefulWidget {
   final String userName;
   final String nisn;
@@ -75,45 +77,17 @@ class GamePage extends StatefulWidget {
 }
 
 class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
-  // State utama permainan
-  int player1Position = 1;
-  int player2Position = 1;
-  int diceValue = 1;
-  bool isWaitingAnswer = false;
-  int throwCount = 0;
-  int bestScore = 0;
-  bool isDiceRolling = false;
-  bool isTwoPlayer = false;
-  int currentPlayer = 1;
+  final GameController _controller = GameController();
+  final GameAudioService _audioService = GameAudioService();
 
-  // Controller untuk animasi
-  late AnimationController _diceController;
-  late AnimationController _playerController;
-  late Animation<double> _diceAnimation;
-  late Animation<double> _playerAnimation;
-
-  final int boardSize = 30;
-  final int boardColumns = 6;
-
-  // Definisi tangga
-  final Map<int, int> ladders = {3: 22, 5: 8, 11: 26, 20: 29};
-
-  // Definisi ular
-  final Map<int, int> snakes = {27: 1, 21: 9, 17: 4, 19: 7};
-
-  // Generate pertanyaan untuk setiap kotak
-  late final Map<int, Map<String, String>> questions = {
-    for (int i = 1; i <= boardSize; i++)
-      i: GameQuestionGenerator.generateForBox(i),
-  };
-
-  late AudioPlayer _audioPlayer; // Deklarasi AudioPlayer
-  bool _isMusicPlaying = true; // State untuk mengontrol status musik
+  late final AnimationController _diceController;
+  late final AnimationController _playerController;
+  late final Animation<double> _diceAnimation;
+  late final Animation<double> _playerAnimation;
 
   @override
   void initState() {
     super.initState();
-    // Inisialisasi controller animasi
     _diceController = AnimationController(
       duration: const Duration(milliseconds: 700),
       vsync: this,
@@ -132,127 +106,86 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
       CurvedAnimation(parent: _playerController, curve: Curves.easeInOut),
     );
 
-    _loadBestScore();
+    _controller.loadBestScore(widget.nisn);
+    _audioService.playBackgroundMusic();
 
-    // Inisialisasi dan mulai musik
-    _audioPlayer = AudioPlayer();
-    _playBackgroundMusic();
-
-    // Tampilkan dialog pemilihan mode setelah frame pertama selesai di-render
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _showModeSelectionDialog();
-    });
-  }
-
-  // Fungsi untuk memutar musik latar
-  void _playBackgroundMusic() async {
-    // Pastikan path ke file musik benar dan terdaftar di pubspec.yaml
-    await _audioPlayer.setReleaseMode(
-      ReleaseMode.loop,
-    ); // Mengulang musik terus-menerus
-    await _audioPlayer.setVolume(0.5); // Atur volume (0.0 - 1.0)
-    await _audioPlayer.play(
-      AssetSource('music/song.mp3'),
-    ); // Pastikan nama file dan path benar
-  }
-
-  // Fungsi untuk menghentikan musik (opsional, jika ingin menghentikan secara eksplisit)
-  void _stopBackgroundMusic() async {
-    await _audioPlayer.stop();
-  }
-
-  // Fungsi untuk menjeda/melanjutkan musik
-  void _toggleMusic() {
-    setState(() {
-      _isMusicPlaying = !_isMusicPlaying;
-      if (_isMusicPlaying) {
-        _audioPlayer.resume(); // Melanjutkan pemutaran
-      } else {
-        _audioPlayer.pause(); // Menjeda pemutaran
-      }
-    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _promptModeSelection());
   }
 
   @override
   void dispose() {
     _diceController.dispose();
     _playerController.dispose();
-    _audioPlayer.dispose(); // Sangat penting untuk membuang audio player
+    _audioService.dispose();
+    _controller.dispose();
     super.dispose();
   }
 
-  final SessionStore _sessionStore = SessionStore();
+  Future<void> _promptModeSelection() async {
+    final twoPlayers = await showModeSelectionDialog(context);
+    if (!mounted || twoPlayers == null) return;
 
-  // Memuat skor terbaik per NISN dari SessionStore (FE-28)
-  Future<void> _loadBestScore() async {
-    final loaded = await _sessionStore.getBestScore(widget.nisn);
-    if (!mounted) return;
-    setState(() {
-      bestScore = loaded;
-    });
+    _controller.setTwoPlayer(twoPlayers);
+    if (twoPlayers) {
+      showGameSnackBar(
+        context,
+        "Mode 2 Pemain dipilih. Ajak temanmu!",
+        Colors.amber.shade700,
+      );
+    } else {
+      showGameSnackBar(
+        context,
+        "Mode 1 Pemain dipilih. Lawan dirimu sendiri!",
+        Colors.teal,
+      );
+    }
   }
 
-  // Menyimpan skor terbaik per NISN ke SessionStore (FE-28)
-  Future<void> _saveBestScore(int score) async {
-    final updated = await _sessionStore.saveBestScoreIfBetter(
-      widget.nisn,
-      score,
-    );
-    if (!mounted) return;
-    setState(() {
-      bestScore = updated;
-    });
+  Future<void> _toggleMusic() async {
+    await _audioService.toggle();
+    if (mounted) setState(() {});
   }
 
-  // Logika utama saat tombol "Lempar Dadu" ditekan
-  void rollDice() async {
-    if (isWaitingAnswer || isDiceRolling) return;
+  Future<void> _rollDice() async {
+    if (_controller.isWaitingAnswer || _controller.isDiceRolling) return;
 
-    setState(() {
-      isDiceRolling = true;
-    });
+    _controller.setDiceRolling(true);
     _diceController.forward(from: 0);
 
-    // Animasi kocok dadu
     for (int i = 0; i < 10; i++) {
       await Future.delayed(const Duration(milliseconds: 80));
-      setState(() {
-        diceValue = Random().nextInt(6) + 1;
-      });
+      if (!mounted) return;
+      _controller.randomizeDiceValue();
     }
 
-    int currentPos = currentPlayer == 1 ? player1Position : player2Position;
-    int tentativePos = currentPos + diceValue;
-
-    if (tentativePos > boardSize) {
-      _showCustomSnackBar(
-        "🚫 Langkah terlalu besar, harus pas di kotak $boardSize!",
+    final tentativePos =
+        _controller.currentPlayerPosition + _controller.diceValue;
+    if (tentativePos > _controller.boardSize) {
+      showGameSnackBar(
+        context,
+        "🚫 Langkah terlalu besar, harus pas di kotak ${_controller.boardSize}!",
         Colors.orange,
       );
-      setState(() {
-        isDiceRolling = false;
-      });
-      _switchPlayer(); // Ganti giliran jika langkah terlalu besar
+      _controller.setDiceRolling(false);
+      _switchPlayer();
       return;
     }
 
-    setState(() {
-      throwCount++;
-      isWaitingAnswer = true;
-    });
+    _controller.startTurnWaitingAnswer();
+    final correct = await showQuestionDialog(
+      context,
+      targetPos: tentativePos,
+      qna: _controller.questions[tentativePos]!,
+    );
+    if (!mounted) return;
 
-    // Tampilkan dialog pertanyaan
-    bool correct = await showQuestionDialog(tentativePos);
-
-    setState(() {
-      isWaitingAnswer = false;
-      isDiceRolling = false;
-    });
+    _controller.finishTurn();
 
     if (correct) {
-      await movePlayer(tentativePos);
+      await _movePlayer(tentativePos);
     } else {
-      _showCustomSnackBar(
+      showGameSnackBar(
+        context,
         "❌ Jawaban salah! Tetap di tempat.",
         Colors.redAccent,
       );
@@ -260,799 +193,198 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     }
   }
 
-  // Logika pergerakan pemain di papan
-  Future<void> movePlayer(int newPos) async {
-    setState(() {
-      if (currentPlayer == 1) {
-        player1Position = newPos;
-      } else {
-        player2Position = newPos;
-      }
-    });
+  Future<void> _movePlayer(int newPos) async {
+    _controller.setCurrentPlayerPosition(newPos);
     _playerController.forward(from: 0);
-    _showCustomSnackBar(
-      "👍 Pemail $currentPlayer maju ke kotak $newPos",
+    showGameSnackBar(
+      context,
+      "👍 Pemain ${_controller.currentPlayer} maju ke kotak $newPos",
       Colors.green,
     );
     await Future.delayed(const Duration(milliseconds: 600));
+    if (!mounted) return;
 
-    // Cek apakah ada tangga
-    if (ladders.containsKey(newPos)) {
-      _showCustomSnackBar(
-        "✨ Wow, dapat tangga! Jawab soal untuk naik.",
-        Colors.cyan,
-      );
-      await Future.delayed(const Duration(milliseconds: 1200));
-      bool canClimb = await showQuestionDialog(newPos, isBonus: true);
-      if (canClimb) {
-        int finalPos = ladders[newPos]!;
-        setState(() {
-          if (currentPlayer == 1) {
-            player1Position = finalPos;
-          } else {
-            player2Position = finalPos;
-          }
-        });
-        _playerController.forward(from: 0);
-        _showCustomSnackBar(
-          "🪜 Berhasil! Naik ke kotak $finalPos!",
-          Colors.green,
-        );
-      } else {
-        _showCustomSnackBar(
-          "😥 Gagal naik tangga, jawaban salah.",
-          Colors.orange,
-        );
-      }
+    if (_controller.ladders.containsKey(newPos)) {
+      await _handleLadder(newPos);
+    } else if (_controller.snakes.containsKey(newPos)) {
+      await _handleSnake(newPos);
     }
-    // Cek apakah ada ular
-    else if (snakes.containsKey(newPos)) {
-      _showCustomSnackBar(
-        "😱 Awas, ada ular! Jawab soal agar tidak turun.",
-        Colors.orangeAccent,
-      );
-      await Future.delayed(const Duration(milliseconds: 1200));
-      bool canAvoid = await showQuestionDialog(newPos, isBonus: true);
-      if (canAvoid) {
-        _showCustomSnackBar("✅ Fiuhh! Selamat dari ular!", Colors.green);
-      } else {
-        int finalPos = snakes[newPos]!;
-        setState(() {
-          if (currentPlayer == 1) {
-            player1Position = finalPos;
-          } else {
-            player2Position = finalPos;
-          }
-        });
-        _playerController.forward(from: 0);
-        _showCustomSnackBar(
-          "🐍 Yah, turun ke kotak $finalPos!",
-          Colors.redAccent,
-        );
-      }
-    }
+    if (!mounted) return;
 
-    // Cek kemenangan
-    int finalPosition = currentPlayer == 1 ? player1Position : player2Position;
-    if (finalPosition == boardSize) {
-      await showWinDialog(currentPlayer);
-      resetGame();
+    if (_controller.currentPlayerPosition == _controller.boardSize) {
+      if (!_controller.isTwoPlayer) {
+        await _controller.saveBestScore(widget.nisn, _controller.throwCount);
+        if (!mounted) return;
+      }
+      await showWinDialog(
+        context,
+        player: _controller.currentPlayer,
+        isTwoPlayer: _controller.isTwoPlayer,
+        throwCount: _controller.throwCount,
+        bestScore: _controller.bestScore,
+      );
+      if (!mounted) return;
+      _resetGame();
     } else {
       _switchPlayer();
     }
   }
 
-  // Ganti giliran pemain
-  void _switchPlayer() {
-    if (!isTwoPlayer) return;
-    setState(() {
-      currentPlayer = (currentPlayer == 1) ? 2 : 1;
-    });
-    _showCustomSnackBar("🔄 Giliran Pemain $currentPlayer", Colors.blueGrey);
-  }
-
-  // Menampilkan dialog pertanyaan
-  Future<bool> showQuestionDialog(int targetPos, {bool isBonus = false}) async {
-    TextEditingController answerCtrl = TextEditingController();
-    bool isCorrect = false;
-    final qna = questions[targetPos]!;
-
-    await showDialog(
-      barrierDismissible: false,
-      context: context,
-      builder: (context) {
-        return Dialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(20),
-              gradient: LinearGradient(
-                colors: [
-                  Theme.of(context).colorScheme.primary.withValues(alpha: 0.8),
-                  Theme.of(context).colorScheme.primary,
-                ],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  isBonus ? Icons.star : Icons.quiz,
-                  size: 48,
-                  color: Colors.white,
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  isBonus ? "Soal Bonus!" : "Soal di Kotak $targetPos",
-                  style: const TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    qna["question"]!,
-                    style: TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.grey.shade800,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ),
-                const SizedBox(height: 20),
-                TextField(
-                  controller: answerCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: InputDecoration(
-                    hintText: "Jawabanmu...",
-                    filled: true,
-                    fillColor: Colors.white,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide.none,
-                    ),
-                    prefixIcon: Icon(
-                      Icons.edit,
-                      color: Theme.of(context).colorScheme.primary,
-                    ),
-                  ),
-                  autofocus: true,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  onSubmitted: (value) {
-                    // Memungkinkan submit dengan keyboard
-                    String input = answerCtrl.text.trim();
-                    if (input.isNotEmpty) {
-                      isCorrect = (input == qna["answer"]);
-                      Navigator.pop(context);
-                    }
-                  },
-                ),
-                const SizedBox(height: 20),
-                ElevatedButton.icon(
-                  onPressed: () {
-                    String input = answerCtrl.text.trim();
-                    if (input.isNotEmpty) {
-                      isCorrect = (input == qna["answer"]);
-                      Navigator.pop(context);
-                    } else {
-                      _showCustomSnackBar(
-                        "Jawaban tidak boleh kosong!",
-                        Colors.orange,
-                      );
-                    }
-                  },
-                  icon: const Icon(Icons.check_circle),
-                  label: const Text("Kirim Jawaban"),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.white,
-                    foregroundColor: Theme.of(context).colorScheme.primary,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 32,
-                      vertical: 12,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
+  Future<void> _handleLadder(int pos) async {
+    showGameSnackBar(
+      context,
+      "✨ Wow, dapat tangga! Jawab soal untuk naik.",
+      Colors.cyan,
     );
-    return isCorrect;
-  }
-
-  // Menampilkan dialog kemenangan
-  Future<void> showWinDialog(int player) async {
-    if (!isTwoPlayer) {
-      await _saveBestScore(throwCount);
-    }
+    await Future.delayed(const Duration(milliseconds: 1200));
     if (!mounted) return;
 
-    await showDialog(
-      barrierDismissible: false,
-      context: context,
-      builder:
-          (_) => Dialog(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(20),
-                gradient: const LinearGradient(
-                  colors: [Color(0xFFFFD700), Color(0xFFFFA000)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.emoji_events, size: 80, color: Colors.white),
-                  const SizedBox(height: 16),
-                  Text(
-                    "✨ SELAMAT PEMAIN $player! ✨",
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  if (!isTwoPlayer)
-                    Text(
-                      "Kamu menang dalam $throwCount lemparan!\nSkor Terbaik: $bestScore",
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        color: Colors.white,
-                        height: 1.5,
-                      ),
-                    ),
-                  const SizedBox(height: 24),
-                  ElevatedButton.icon(
-                    onPressed: () {
-                      Navigator.pop(context);
-                      resetGame();
-                    },
-                    icon: const Icon(Icons.celebration),
-                    label: const Text("Main Lagi"),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      foregroundColor: const Color(0xFFFFA000),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+    final canClimb = await showQuestionDialog(
+      context,
+      targetPos: pos,
+      qna: _controller.questions[pos]!,
+      isBonus: true,
     );
+    if (!mounted) return;
+
+    if (canClimb) {
+      final finalPos = _controller.ladders[pos]!;
+      _controller.setCurrentPlayerPosition(finalPos);
+      _playerController.forward(from: 0);
+      showGameSnackBar(
+        context,
+        "🪜 Berhasil! Naik ke kotak $finalPos!",
+        Colors.green,
+      );
+    } else {
+      showGameSnackBar(
+        context,
+        "😥 Gagal naik tangga, jawaban salah.",
+        Colors.orange,
+      );
+    }
   }
 
-  // Mereset state permainan ke awal
-  void resetGame() {
-    setState(() {
-      player1Position = 1;
-      player2Position = 1;
-      diceValue = 1;
-      isWaitingAnswer = false;
-      throwCount = 0;
-      isDiceRolling = false;
-      currentPlayer = 1;
-    });
-    _showCustomSnackBar("🔄 Permainan dimulai ulang!", Colors.blueGrey);
+  Future<void> _handleSnake(int pos) async {
+    showGameSnackBar(
+      context,
+      "😱 Awas, ada ular! Jawab soal agar tidak turun.",
+      Colors.orangeAccent,
+    );
+    await Future.delayed(const Duration(milliseconds: 1200));
+    if (!mounted) return;
+
+    final canAvoid = await showQuestionDialog(
+      context,
+      targetPos: pos,
+      qna: _controller.questions[pos]!,
+      isBonus: true,
+    );
+    if (!mounted) return;
+
+    if (canAvoid) {
+      showGameSnackBar(context, "✅ Fiuhh! Selamat dari ular!", Colors.green);
+    } else {
+      final finalPos = _controller.snakes[pos]!;
+      _controller.setCurrentPlayerPosition(finalPos);
+      _playerController.forward(from: 0);
+      showGameSnackBar(
+        context,
+        "🐍 Yah, turun ke kotak $finalPos!",
+        Colors.redAccent,
+      );
+    }
   }
 
-  // Menampilkan notifikasi custom (SnackBar)
-  void _showCustomSnackBar(String msg, Color color) {
-    ScaffoldMessenger.of(context).removeCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          msg,
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        backgroundColor: color,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-        duration: const Duration(seconds: 2),
+  void _switchPlayer() {
+    if (_controller.switchPlayer()) {
+      showGameSnackBar(
+        context,
+        "🔄 Giliran Pemain ${_controller.currentPlayer}",
+        Colors.blueGrey,
+      );
+    }
+  }
+
+  void _resetGame() {
+    _controller.resetGame();
+    showGameSnackBar(context, "🔄 Permainan dimulai ulang!", Colors.blueGrey);
+  }
+
+  void _navigateBack() {
+    _audioService.stop();
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder:
+            (context) =>
+                HomeScreen(userName: widget.userName, nisn: widget.nisn),
       ),
     );
   }
 
-  // Menampilkan dialog pemilihan mode permainan
-  Future<void> _showModeSelectionDialog() async {
-    await showDialog(
-      barrierDismissible: false,
-      context: context,
-      builder: (context) {
-        // Menggunakan Dialog biasa untuk kontrol penuh atas layout
-        return Dialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              mainAxisSize:
-                  MainAxisSize.min, // Membuat Column sesuai ukuran konten
-              children: [
-                // Header Dialog
-                Icon(
-                  Icons.gamepad_rounded,
-                  size: 48,
-                  color: Theme.of(context).primaryColor,
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  "Pilih Mode Permainan",
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  "Mau bermain sendiri atau tantang temanmu?",
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
-                ),
-                const SizedBox(height: 24),
-
-                // Tombol Pilihan (Layout Column)
-                SizedBox(
-                  width:
-                      double.infinity, // Membuat tombol memenuhi lebar dialog
-                  child: ElevatedButton.icon(
-                    icon: const Icon(Icons.person),
-                    label: const Text("1 Pemain (Solo)"),
-                    onPressed: () {
-                      setState(() => isTwoPlayer = false);
-                      Navigator.pop(context);
-                      _showCustomSnackBar(
-                        "Mode 1 Pemain dipilih. Lawan dirimu sendiri!",
-                        Colors.teal,
-                      );
-                    },
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      backgroundColor: Theme.of(context).primaryColor,
-                      foregroundColor: Colors.white,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width:
-                      double.infinity, // Membuat tombol memenuhi lebar dialog
-                  child: ElevatedButton.icon(
-                    icon: const Icon(Icons.people),
-                    label: const Text("2 Pemain (Duel)"),
-                    onPressed: () {
-                      setState(() => isTwoPlayer = true);
-                      Navigator.pop(context);
-                      _showCustomSnackBar(
-                        "Mode 2 Pemain dipilih. Ajak temanmu!",
-                        Colors.amber.shade700,
-                      );
-                    },
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      backgroundColor: Theme.of(context).colorScheme.secondary,
-                      foregroundColor: Colors.white,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  // Widget utama yang membangun seluruh tampilan
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            children: [
-              // Header
-              const Text(
-                'Ular Tangga Matematika',
-                style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
-              ),
-              Text(
-                'Lempar dadu, jawab soal, dan menangkan game!',
-                style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
-              ),
-              const SizedBox(height: 8), // Sedikit ruang tambahan
-              // Tombol untuk mengontrol musik
-              Align(
-                alignment: Alignment.centerRight,
-                child: IconButton(
-                  icon: Icon(
-                    _isMusicPlaying ? Icons.volume_up : Icons.volume_off,
-                    color: Theme.of(context).colorScheme.primary,
+        child: ListenableBuilder(
+          listenable: _controller,
+          builder: (context, _) {
+            return SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  const Text(
+                    'Ular Tangga Matematika',
+                    style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
                   ),
-                  onPressed: _toggleMusic,
-                  tooltip: _isMusicPlaying ? "Matikan Musik" : "Putar Musik",
-                ),
-              ),
-              const SizedBox(height: 8),
-
-              // Skor dan Status
-              buildGameStatus(),
-              if (!isTwoPlayer) ...[
-                const SizedBox(height: 8),
-                buildLeaderboard(),
-              ],
-              const SizedBox(height: 20),
-
-              // Papan Permainan
-              buildBoard(),
-              const SizedBox(height: 20),
-
-              // Kontrol Permainan
-              buildGameControls(),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  // Widget untuk papan permainan
-  Widget buildBoard() {
-    return AspectRatio(
-      aspectRatio: 1, // Membuat papan selalu persegi
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.1),
-              blurRadius: 20,
-              offset: const Offset(0, 10),
-            ),
-          ],
-        ),
-        padding: const EdgeInsets.all(8),
-        child: GridView.builder(
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: boardSize,
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: boardColumns,
-            crossAxisSpacing: 6,
-            mainAxisSpacing: 6,
-          ),
-          itemBuilder: (context, index) {
-            // *** LOGIKA BARU UNTUK PENOMORAN DARI BAWAH KIRI ***
-            int row = index ~/ boardColumns;
-            int col = index % boardColumns;
-            int invertedRow = (boardSize - 1) ~/ boardColumns - row;
-            int boxNumber;
-            if (invertedRow % 2 == 0) {
-              // Baris genap (0, 2, 4): Kiri ke Kanan
-              boxNumber = invertedRow * boardColumns + col + 1;
-            } else {
-              // Baris ganjil (1, 3, 5): Kanan ke Kiri
-              boxNumber =
-                  invertedRow * boardColumns + (boardColumns - 1 - col) + 1;
-            }
-            // *** AKHIR LOGIKA BARU ***
-
-            bool hasLadder = ladders.containsKey(boxNumber);
-            bool hasSnake = snakes.containsKey(boxNumber);
-
-            return AnimatedBuilder(
-              animation: _playerAnimation,
-              builder: (context, child) {
-                bool hasPlayer1 = player1Position == boxNumber;
-                bool hasPlayer2 = isTwoPlayer && player2Position == boxNumber;
-                double scale =
-                    (hasPlayer1 && currentPlayer == 1) ||
-                            (hasPlayer2 && currentPlayer == 2)
-                        ? _playerAnimation.value
-                        : 1.0;
-
-                return Transform.scale(
-                  scale: scale,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color:
-                          (invertedRow + col) % 2 == 0
-                              ? const Color(0xFFE0F2F1)
-                              : const Color(0xFFB2DFDB),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        // Nomor Kotak
-                        Text(
-                          "$boxNumber",
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                            color: Colors.black.withValues(alpha: 0.4),
-                          ),
-                        ),
-                        // Ikon Ular dan Tangga
-                        if (hasLadder)
-                          Text(
-                            "🪜",
-                            style: TextStyle(
-                              fontSize: 24,
-                              shadows: [
-                                Shadow(
-                                  color: Colors.black.withValues(alpha: 0.3),
-                                  blurRadius: 4,
-                                ),
-                              ],
-                            ),
-                          ),
-                        if (hasSnake)
-                          Text(
-                            "🐍",
-                            style: TextStyle(
-                              fontSize: 24,
-                              shadows: [
-                                Shadow(
-                                  color: Colors.black.withValues(alpha: 0.3),
-                                  blurRadius: 4,
-                                ),
-                              ],
-                            ),
-                          ),
-
-                        // Pion Pemain
-                        if (hasPlayer1 && hasPlayer2)
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                            children: [buildPlayerPawn(1), buildPlayerPawn(2)],
-                          )
-                        else if (hasPlayer1)
-                          buildPlayerPawn(1)
-                        else if (hasPlayer2)
-                          buildPlayerPawn(2),
-                      ],
+                  Text(
+                    'Lempar dadu, jawab soal, dan menangkan game!',
+                    style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
+                  ),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: IconButton(
+                      icon: Icon(
+                        _audioService.isMusicPlaying
+                            ? Icons.volume_up
+                            : Icons.volume_off,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                      onPressed: _toggleMusic,
+                      tooltip:
+                          _audioService.isMusicPlaying
+                              ? "Matikan Musik"
+                              : "Putar Musik",
                     ),
                   ),
-                );
-              },
+                  const SizedBox(height: 8),
+                  GameStatusCard(controller: _controller),
+                  if (!_controller.isTwoPlayer) ...[
+                    const SizedBox(height: 8),
+                    GameLeaderboardCard(bestScore: _controller.bestScore),
+                  ],
+                  const SizedBox(height: 20),
+                  GameBoard(
+                    controller: _controller,
+                    playerAnimation: _playerAnimation,
+                  ),
+                  const SizedBox(height: 20),
+                  GameControls(
+                    controller: _controller,
+                    diceController: _diceController,
+                    diceAnimation: _diceAnimation,
+                    onRollDice: _rollDice,
+                    onBack: _navigateBack,
+                    onReset: _resetGame,
+                  ),
+                ],
+              ),
             );
           },
         ),
       ),
-    );
-  }
-
-  // Widget untuk pion pemain
-  Widget buildPlayerPawn(int player) {
-    return CircleAvatar(
-      backgroundColor: player == 1 ? Colors.blue.shade700 : Colors.red.shade700,
-      radius: 14,
-      child: Text(
-        "P$player",
-        style: const TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.bold,
-          fontSize: 12,
-        ),
-      ),
-    );
-  }
-
-  // Widget untuk panel skor terbaik
-  Widget buildLeaderboard() {
-    return Card(
-      child: ListTile(
-        leading: Icon(
-          Icons.star,
-          color: Theme.of(context).colorScheme.secondary,
-          size: 32,
-        ),
-        title: const Text(
-          "Skor Terbaik",
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
-        subtitle: const Text("Jumlah lemparan paling sedikit"),
-        trailing: Text(
-          bestScore == 0 ? "-" : bestScore.toString(),
-          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-        ),
-      ),
-    );
-  }
-
-  // Widget untuk panel status permainan
-  Widget buildGameStatus() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12.0),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: [
-            _buildStatusColumn(
-              icon: Icons.person,
-              label: "Pemain 1",
-              value: player1Position.toString(),
-              color: Colors.blue.shade700,
-              isActive: currentPlayer == 1,
-            ),
-            if (isTwoPlayer)
-              _buildStatusColumn(
-                icon: Icons.person,
-                label: "Pemain 2",
-                value: player2Position.toString(),
-                color: Colors.red.shade700,
-                isActive: currentPlayer == 2,
-              ),
-            _buildStatusColumn(
-              icon: Icons.casino,
-              label: "Dadu",
-              value: diceValue.toString(),
-              color: Colors.grey.shade700,
-            ),
-            _buildStatusColumn(
-              icon: Icons.score,
-              label: "Lemparan",
-              value: throwCount.toString(),
-              color: Colors.grey.shade700,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // Helper untuk membuat kolom di panel status
-  Widget _buildStatusColumn({
-    required IconData icon,
-    required String label,
-    required String value,
-    required Color color,
-    bool isActive = false,
-  }) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: isActive ? color.withValues(alpha: 0.15) : Colors.transparent,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        children: [
-          Icon(icon, color: color, size: 28),
-          const SizedBox(height: 4),
-          Text(
-            label,
-            style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
-          ),
-          Text(
-            value,
-            style: const TextStyle(
-              color: Colors.black,
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Widget untuk tombol-tombol kontrol
-  Widget buildGameControls() {
-    return Column(
-      children: [
-        // Dadu
-        AnimatedBuilder(
-          animation: _diceController,
-          builder: (context, child) {
-            return Transform.rotate(
-              angle: _diceAnimation.value * 2 * pi,
-              child: Transform.scale(
-                scale: 1 + (_diceAnimation.value * 0.2),
-                child: Icon(
-                  diceValue == 1
-                      ? Icons.filter_1
-                      : diceValue == 2
-                      ? Icons.filter_2
-                      : diceValue == 3
-                      ? Icons.filter_3
-                      : diceValue == 4
-                      ? Icons.filter_4
-                      : diceValue == 5
-                      ? Icons.filter_5
-                      : Icons.filter_6,
-                  size: 60,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-              ),
-            );
-          },
-        ),
-        const SizedBox(height: 16),
-
-        // Tombol Lempar Dadu
-        ElevatedButton.icon(
-          onPressed: isDiceRolling || isWaitingAnswer ? null : rollDice,
-          icon: const Icon(Icons.casino_outlined),
-          label: Text(
-            isDiceRolling
-                ? "Mengacak..."
-                : isWaitingAnswer
-                ? "Menunggu Jawaban..."
-                : "Lempar Dadu! (P$currentPlayer)",
-          ),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: Theme.of(context).colorScheme.secondary,
-            foregroundColor: Colors.white,
-            minimumSize: const Size(double.infinity, 60),
-          ),
-        ),
-        const SizedBox(height: 12),
-
-        // Tombol Kembali dan Reset
-        Row(
-          children: [
-            Expanded(
-              child: TextButton.icon(
-                icon: const Icon(Icons.arrow_back),
-                label: const Text("Kembali"),
-                onPressed: () {
-                  // Pastikan untuk menghentikan musik saat kembali ke halaman sebelumnya
-                  _stopBackgroundMusic();
-                  Navigator.pushReplacement(
-                    context,
-                    MaterialPageRoute(
-                      builder:
-                          (context) => HomeScreen(
-                            userName: widget.userName,
-                            nisn: widget.nisn,
-                          ),
-                    ),
-                  );
-                },
-              ),
-            ),
-            Expanded(
-              child: TextButton.icon(
-                icon: const Icon(Icons.refresh),
-                label: const Text("Reset"),
-                onPressed: resetGame,
-              ),
-            ),
-          ],
-        ),
-      ],
     );
   }
 }

@@ -1,56 +1,73 @@
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../core/config/supabase_config.dart';
+import '../core/errors/app_exception.dart';
 import '../core/storage/session_store.dart';
 import '../models/user_profile.dart';
-import 'api_client.dart';
 
 export '../models/user_profile.dart' show LoginResult;
 
-/// Layanan domain autentikasi siswa (`POST /login`, `POST /logout`).
+/// Layanan domain autentikasi siswa berbasis Supabase (`siswa` table).
 class AuthService {
-  AuthService({ApiClient? apiClient, SessionStore? sessionStore})
-    : _apiClient = apiClient ?? ApiClient.shared,
+  AuthService({SupabaseClient? client, SessionStore? sessionStore})
+    : _client = client,
       _sessionStore = sessionStore ?? SessionStore();
 
-  final ApiClient _apiClient;
+  final SupabaseClient? _client;
   final SessionStore _sessionStore;
 
-  /// Melakukan login menggunakan NISN dan menyimpan sesi ke [SessionStore].
+  SupabaseClient get _supabase => _client ?? Supabase.instance.client;
+
+  /// Melakukan login menggunakan NISN pada tabel `siswa` dan menyimpan sesi ke [SessionStore].
   Future<LoginResult> login(String nisn) async {
-    final data = await _apiClient.post(
-      '/login',
-      body: {'nisn': nisn},
-      includeAuth: false,
-    );
+    try {
+      final data = await _supabase
+          .from('siswa')
+          .select('id, nama, nisn, kelas')
+          .eq('nisn', nisn)
+          .maybeSingle()
+          .timeout(SupabaseConfig.requestTimeout);
 
-    if (data is! Map<String, dynamic>) {
-      throw ApiException(message: 'Format respons login tidak valid.');
+      if (data == null) {
+        throw const AppException(
+          statusCode: 404,
+          message: 'NISN tidak terdaftar.',
+        );
+      }
+
+      final siswaId = data['id'] as int?;
+      final nama = data['nama']?.toString() ?? 'Siswa';
+      final nisnResp = data['nisn']?.toString() ?? nisn;
+      final kelas = data['kelas']?.toString();
+      final token =
+          _supabase.auth.currentSession?.accessToken ?? 'supabase-$nisnResp';
+
+      await _sessionStore.saveSession(
+        siswaId: siswaId,
+        token: token,
+        userName: nama,
+        nisn: nisnResp,
+        kelas: kelas,
+      );
+
+      return LoginResult(
+        siswaId: siswaId,
+        token: token,
+        nama: nama,
+        nisn: nisnResp,
+        kelas: kelas,
+      );
+    } catch (e) {
+      throw await AppException.fromError(e, sessionStore: _sessionStore);
     }
-
-    final token = data['token']?.toString() ?? '';
-    final siswa = data['data_siswa'] as Map<String, dynamic>? ?? {};
-    final nama = siswa['nama']?.toString() ?? 'Siswa';
-    final nisnResp = siswa['nisn']?.toString() ?? nisn;
-    final kelas = siswa['kelas']?.toString();
-
-    if (token.isEmpty) {
-      throw ApiException(message: 'Token autentikasi tidak ditemukan.');
-    }
-
-    await _sessionStore.saveSession(
-      token: token,
-      userName: nama,
-      nisn: nisnResp,
-      kelas: kelas,
-    );
-
-    return LoginResult(token: token, nama: nama, nisn: nisnResp, kelas: kelas);
   }
 
-  /// Menghapus token di server (opsional) dan membersihkan hanya kunci sesi lokal.
+  /// Keluar dari sesi Supabase (jika ada) dan membersihkan hanya kunci sesi lokal.
   Future<void> logout() async {
     try {
-      await _apiClient.post('/logout');
+      await _supabase.auth.signOut();
     } catch (_) {
-      // Logout lokal tetap dilanjutkan meskipun endpoint logout opsional tidak tersedia.
+      // Tetap lanjut membersihkan sesi lokal meskipun signOut auth tidak aktif.
     }
     await _sessionStore.clearSession();
   }

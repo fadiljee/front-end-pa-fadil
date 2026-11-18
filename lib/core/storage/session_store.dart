@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 class SessionStore {
   SessionStore({SharedPreferences? prefs}) : _prefs = prefs;
 
+  static const String _siswaIdKey = 'siswaId';
   static const String _tokenKey = 'token';
   static const String _userNameKey = 'userName';
   static const String _nisnKey = 'nisn';
@@ -18,12 +19,16 @@ class SessionStore {
 
   /// Menyimpan data sesi pengguna setelah login berhasil.
   Future<void> saveSession({
+    int? siswaId,
     required String token,
     required String userName,
     required String nisn,
     String? kelas,
   }) async {
     final prefs = await _instance();
+    if (siswaId != null) {
+      await prefs.setInt(_siswaIdKey, siswaId);
+    }
     await prefs.setString(_tokenKey, token);
     await prefs.setString(_userNameKey, userName);
     await prefs.setString(_nisnKey, nisn);
@@ -32,6 +37,11 @@ class SessionStore {
     } else {
       await prefs.remove(_kelasKey);
     }
+  }
+
+  Future<int?> getSiswaId() async {
+    final prefs = await _instance();
+    return prefs.getInt(_siswaIdKey);
   }
 
   Future<String?> getToken() async {
@@ -57,6 +67,7 @@ class SessionStore {
   /// Menghapus hanya kunci sesi agar data lain seperti `bestScore_<nisn>` tetap aman.
   Future<void> clearSession() async {
     final prefs = await _instance();
+    await prefs.remove(_siswaIdKey);
     await prefs.remove(_tokenKey);
     await prefs.remove(_userNameKey);
     await prefs.remove(_nisnKey);

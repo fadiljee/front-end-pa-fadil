@@ -1,12 +1,14 @@
-/// Hasil login siswa yang dikembalikan oleh `POST /login`.
+/// Hasil login siswa dari tabel `siswa` di Supabase.
 class LoginResult {
   const LoginResult({
+    this.siswaId,
     required this.token,
     required this.nama,
     required this.nisn,
     this.kelas,
   });
 
+  final int? siswaId;
   final String token;
   final String nama;
   final String nisn;
@@ -69,7 +71,18 @@ class UserStats {
     final rawGelar = json['gelar']?.toString().trim();
     return UserStats(
       totalSkor: parsedScore,
-      gelar: (rawGelar == null || rawGelar.isEmpty) ? null : rawGelar,
+      gelar:
+          (rawGelar == null || rawGelar.isEmpty)
+              ? computeGelar(parsedScore)
+              : rawGelar,
     );
+  }
+
+  /// Menghitung gelar peringkat siswa berdasarkan total skor.
+  static String computeGelar(int totalSkor) {
+    if (totalSkor >= 80) return 'Master Matematika';
+    if (totalSkor >= 60) return 'Pejuang Hebat';
+    if (totalSkor >= 40) return 'Pembelajar Aktif';
+    return 'Pemula';
   }
 }

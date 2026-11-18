@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../../services/api_client.dart';
+import '../../core/errors/app_exception.dart';
 import '../../services/materi_service.dart';
 import '../quiz/quiz_screen.dart';
 
@@ -73,7 +73,7 @@ class _MateriDetailScreenState extends State<MateriDetailScreen>
       });
       isLoading.value = false;
       _animationController.forward();
-    } on ApiException catch (e) {
+    } on AppException catch (e) {
       errorMessage.value = e.message;
       isLoading.value = false;
     } catch (e) {

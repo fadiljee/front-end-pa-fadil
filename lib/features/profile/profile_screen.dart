@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shimmer/shimmer.dart';
+import '../../core/errors/app_exception.dart';
 import '../../core/storage/session_store.dart';
-import '../../services/api_client.dart';
 import '../../services/auth_service.dart';
 import '../../services/user_service.dart';
 import '../auth/name_input_screen.dart';
@@ -169,7 +169,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       });
       _fadeController.forward();
       _slideController.forward();
-    } on ApiException catch (e) {
+    } on AppException catch (e) {
       if (!mounted) return;
       setState(() {
         _siswa = null;
